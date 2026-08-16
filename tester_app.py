@@ -75,10 +75,19 @@ DEFAULT_CFG = {
 def load_cfg():
     if os.path.exists(CFG_F):
         try:
-            return {**DEFAULT_CFG, **json.load(open(CFG_F))}
+            cfg = {**DEFAULT_CFG, **json.load(open(CFG_F))}
         except Exception:
-            pass
-    return dict(DEFAULT_CFG)
+            cfg = dict(DEFAULT_CFG)
+    else:
+        cfg = dict(DEFAULT_CFG)
+    # Allow overriding the dataset directory with an environment variable (useful on hosts)
+    try:
+        env_dir = os.environ.get("DATA_DIR")
+        if env_dir:
+            cfg["dataset_dir"] = env_dir
+    except Exception:
+        pass
+    return cfg
 
 
 def save_cfg(c):
