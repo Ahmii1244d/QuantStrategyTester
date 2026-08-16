@@ -1161,7 +1161,12 @@ HELP = {
 
 
 # ============================== ENTRY POINT ================================
-if __name__ == "__main__":  
-    import tester_ui, sys as _s
+if __name__ == "__main__":
+    import tester_ui, sys as _s, os as _os
 
-    tester_ui.serve(_s.modules[__name__], 5000, "0.0.0.0")
+    # Read PORT from environment (Render sets $PORT). Default to 5000 for local runs.
+    try:
+        _port = int(_os.environ.get("PORT", "5000"))
+    except Exception:
+        _port = 5000
+    tester_ui.serve(_s.modules[__name__], _port, "0.0.0.0")

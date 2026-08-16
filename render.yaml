@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: quant-strategy-tester
+    env: python
+    plan: starter
+    region: oregon
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python tester_app.py"
+    envVars:
+      - key: PORT
+        value: "5000"
