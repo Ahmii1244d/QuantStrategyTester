@@ -1,0 +1,902 @@
+[
+  {
+    "id": "054e93611f64",
+    "date": "2026-08-13 16:01",
+    "score": 25,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "8aa5f48c7628",
+    "date": "2026-08-13 16:01",
+    "score": 25,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "8b8631e2ed9f",
+    "date": "2026-08-13 16:06",
+    "score": 90,
+    "verdict": "EXCELLENT",
+    "trades": 1406,
+    "hold_expR": 0.446,
+    "mode": "deep"
+  },
+  {
+    "id": "1ef722b20061",
+    "date": "2026-08-13 16:07",
+    "score": 90,
+    "verdict": "EXCELLENT",
+    "trades": 1406,
+    "hold_expR": 0.446,
+    "mode": "deep"
+  },
+  {
+    "id": "12cfb4363adb",
+    "date": "2026-08-13 16:09",
+    "score": 76,
+    "verdict": "GOOD",
+    "trades": 1406,
+    "hold_expR": 0.446,
+    "mode": "fast"
+  },
+  {
+    "id": "adea9858421a",
+    "date": "2026-08-13 16:20",
+    "score": 76,
+    "verdict": "GOOD",
+    "trades": 1406,
+    "hold_expR": 0.446,
+    "mode": "fast"
+  },
+  {
+    "id": "f99a2c878545",
+    "date": "2026-08-13 16:25",
+    "score": 76,
+    "verdict": "GOOD",
+    "trades": 1406,
+    "hold_expR": 0.446,
+    "mode": "fast"
+  },
+  {
+    "id": "2385c9f57075",
+    "date": "2026-08-13 16:25",
+    "score": 37,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "fast"
+  },
+  {
+    "id": "49c00ae9f36e",
+    "date": "2026-08-13 16:25",
+    "score": 27,
+    "verdict": "BAD",
+    "trades": 14539,
+    "hold_expR": -0.0021,
+    "mode": "fast"
+  },
+  {
+    "id": "7ef3effec7d1",
+    "date": "2026-08-13 16:30",
+    "score": 37,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "fast"
+  },
+  {
+    "id": "d59f003c92a6",
+    "date": "2026-08-13 16:30",
+    "score": 27,
+    "verdict": "BAD",
+    "trades": 14539,
+    "hold_expR": -0.0021,
+    "mode": "fast"
+  },
+  {
+    "id": "e5c6b54dc936",
+    "date": "2026-08-13 16:32",
+    "score": 37,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "fast"
+  },
+  {
+    "id": "52c440ce2199",
+    "date": "2026-08-13 16:32",
+    "score": 37,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "fast"
+  },
+  {
+    "id": "897bad89786c",
+    "date": "2026-08-13 16:32",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "3a9a0b092927",
+    "date": "2026-08-13 16:32",
+    "score": 71,
+    "verdict": "GOOD",
+    "trades": 1780,
+    "hold_expR": 0.0438,
+    "mode": "fast"
+  },
+  {
+    "id": "cf6e4f79f295",
+    "date": "2026-08-13 16:32",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "000bfeb8b5a8",
+    "date": "2026-08-13 16:32",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "3e9814cca73b",
+    "date": "2026-08-13 16:32",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "08df8dcdec3c",
+    "date": "2026-08-13 16:34",
+    "score": 37,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "fast"
+  },
+  {
+    "id": "2d417aa76410",
+    "date": "2026-08-13 16:34",
+    "score": 37,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "fast"
+  },
+  {
+    "id": "e8a2221cd6f8",
+    "date": "2026-08-13 16:34",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "1d4881c7e242",
+    "date": "2026-08-13 16:35",
+    "score": 71,
+    "verdict": "GOOD",
+    "trades": 1780,
+    "hold_expR": 0.0438,
+    "mode": "fast"
+  },
+  {
+    "id": "b8836ca53745",
+    "date": "2026-08-13 16:35",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "7dd5eb686ef5",
+    "date": "2026-08-13 16:35",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "36a5447e00eb",
+    "date": "2026-08-13 16:35",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "54704a2662b6",
+    "date": "2026-08-13 16:36",
+    "score": 37,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "fast"
+  },
+  {
+    "id": "d8ba214400f5",
+    "date": "2026-08-13 16:36",
+    "score": 37,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "fast"
+  },
+  {
+    "id": "a656ff33d01d",
+    "date": "2026-08-13 16:36",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "31d50eeae18f",
+    "date": "2026-08-13 16:36",
+    "score": 71,
+    "verdict": "GOOD",
+    "trades": 1780,
+    "hold_expR": 0.0438,
+    "mode": "fast"
+  },
+  {
+    "id": "19630baaecfe",
+    "date": "2026-08-13 16:36",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "4f784459ebbf",
+    "date": "2026-08-13 16:36",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "5aedf0bf0c91",
+    "date": "2026-08-13 16:36",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "b86c61dcafd7",
+    "date": "2026-08-13 16:37",
+    "score": 37,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "fast"
+  },
+  {
+    "id": "24bc2d0f9f12",
+    "date": "2026-08-13 16:37",
+    "score": 37,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "fast"
+  },
+  {
+    "id": "fcd171ae1061",
+    "date": "2026-08-13 16:37",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "cc0eea790e4f",
+    "date": "2026-08-13 16:37",
+    "score": 71,
+    "verdict": "GOOD",
+    "trades": 1780,
+    "hold_expR": 0.0438,
+    "mode": "fast"
+  },
+  {
+    "id": "4a145a2e00a6",
+    "date": "2026-08-13 16:37",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "ae9baf763465",
+    "date": "2026-08-13 16:37",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "060043187a8b",
+    "date": "2026-08-13 16:37",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "d2afe9c90dec",
+    "date": "2026-08-13 16:39",
+    "score": 37,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "fast"
+  },
+  {
+    "id": "4c99c591e962",
+    "date": "2026-08-13 16:39",
+    "score": 27,
+    "verdict": "BAD",
+    "trades": 17695,
+    "hold_expR": -0.0207,
+    "mode": "fast"
+  },
+  {
+    "id": "e725b8501c9a",
+    "date": "2026-08-13 16:40",
+    "score": 37,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "fast"
+  },
+  {
+    "id": "fc7190eca71d",
+    "date": "2026-08-13 16:40",
+    "score": 37,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "fast"
+  },
+  {
+    "id": "ce6dff2ea55a",
+    "date": "2026-08-13 16:40",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "aaf78fbe10d8",
+    "date": "2026-08-13 16:40",
+    "score": 71,
+    "verdict": "GOOD",
+    "trades": 1780,
+    "hold_expR": 0.0438,
+    "mode": "fast"
+  },
+  {
+    "id": "27415ed90324",
+    "date": "2026-08-13 16:40",
+    "score": 27,
+    "verdict": "BAD",
+    "trades": 17695,
+    "hold_expR": -0.0207,
+    "mode": "fast"
+  },
+  {
+    "id": "abdeb55d9b03",
+    "date": "2026-08-13 16:40",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "5714865e5412",
+    "date": "2026-08-13 16:40",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "eab437a20f4f",
+    "date": "2026-08-13 16:40",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "de2c5abb20d8",
+    "date": "2026-08-15 17:03",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "abc925de9680",
+    "date": "2026-08-15 17:05",
+    "score": 25,
+    "verdict": "BAD",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "20bedf40e3e9",
+    "date": "2026-08-15 17:42",
+    "score": 0,
+    "verdict": "FAILED",
+    "trades": 10845,
+    "hold_expR": -0.0322,
+    "mode": "deep"
+  },
+  {
+    "id": "3b03faa8b58a",
+    "date": "2026-08-15 18:27",
+    "score": 27,
+    "verdict": "BAD",
+    "trades": 1229,
+    "hold_expR": -0.0163,
+    "mode": "fast"
+  },
+  {
+    "id": "175f9a94fe04",
+    "date": "2026-08-15 18:27",
+    "score": 15,
+    "verdict": "FAILED",
+    "trades": 1229,
+    "hold_expR": -0.0163,
+    "mode": "deep"
+  },
+  {
+    "id": "58642d2c047f",
+    "date": "2026-08-15 19:01",
+    "score": 0,
+    "verdict": "FAILED",
+    "trades": 8447,
+    "hold_expR": -0.0298,
+    "mode": "deep"
+  },
+  {
+    "id": "4eb7cd59faf1",
+    "date": "2026-08-15 19:03",
+    "score": 0,
+    "verdict": "FAILED",
+    "trades": 11650,
+    "hold_expR": -0.0566,
+    "mode": "deep"
+  },
+  {
+    "id": "0f8757ffd3f7",
+    "date": "2026-08-15 19:23",
+    "score": 0,
+    "verdict": "FAILED",
+    "trades": 4353,
+    "hold_expR": -0.03,
+    "mode": "deep"
+  },
+  {
+    "id": "699c19ab9e04",
+    "date": "2026-08-15 19:24",
+    "score": 43,
+    "verdict": "WEAK",
+    "trades": 12111,
+    "hold_expR": 0.0023,
+    "mode": "deep"
+  },
+  {
+    "id": "02163c592721",
+    "date": "2026-08-15 19:25",
+    "score": 43,
+    "verdict": "WEAK",
+    "trades": 12111,
+    "hold_expR": 0.0023,
+    "mode": "deep"
+  },
+  {
+    "id": "a1be66a06d61",
+    "date": "2026-08-15 19:27",
+    "score": 43,
+    "verdict": "WEAK",
+    "trades": 3830,
+    "hold_expR": 0.0822,
+    "mode": "deep"
+  },
+  {
+    "id": "3d7960cc3875",
+    "date": "2026-08-15 19:28",
+    "score": 45,
+    "verdict": "WEAK",
+    "trades": 3830,
+    "hold_expR": 0.0822,
+    "mode": "deep"
+  },
+  {
+    "id": "5babfbd5af84",
+    "date": "2026-08-15 19:29",
+    "score": 15,
+    "verdict": "FAILED",
+    "trades": 5637,
+    "hold_expR": -0.019,
+    "mode": "deep"
+  },
+  {
+    "id": "5371c232f1c3",
+    "date": "2026-08-15 19:31",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 7238,
+    "hold_expR": 0.0521,
+    "mode": "deep"
+  },
+  {
+    "id": "2efa82330336",
+    "date": "2026-08-15 19:32",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 7238,
+    "hold_expR": 0.0521,
+    "mode": "deep"
+  },
+  {
+    "id": "22ed992242f0",
+    "date": "2026-08-15 20:06",
+    "score": 35,
+    "verdict": "BAD",
+    "trades": 7238,
+    "hold_expR": 0.0521,
+    "mode": "deep"
+  },
+  {
+    "id": "dd6476d25857",
+    "date": "2026-08-15 20:09",
+    "score": 0,
+    "verdict": "FAILED",
+    "trades": 2327,
+    "hold_expR": -0.0367,
+    "mode": "deep"
+  },
+  {
+    "id": "e71008701e7d",
+    "date": "2026-08-15 20:12",
+    "score": 7,
+    "verdict": "FAILED",
+    "trades": 7131,
+    "hold_expR": -0.0172,
+    "mode": "deep"
+  },
+  {
+    "id": "1935e0d5a020",
+    "date": "2026-08-15 20:13",
+    "score": 69,
+    "verdict": "PROMISING",
+    "trades": 2558,
+    "hold_expR": 0.0038,
+    "mode": "deep"
+  },
+  {
+    "id": "d331b2faa8a1",
+    "date": "2026-08-15 20:14",
+    "score": 59,
+    "verdict": "PROMISING",
+    "trades": 2558,
+    "hold_expR": 0.0038,
+    "mode": "deep"
+  },
+  {
+    "id": "0552921924ad",
+    "date": "2026-08-15 20:16",
+    "score": 75,
+    "verdict": "GOOD",
+    "trades": 2558,
+    "hold_expR": 0.0038,
+    "mode": "deep"
+  },
+  {
+    "id": "644a5ed617b8",
+    "date": "2026-08-15 20:20",
+    "score": 71,
+    "verdict": "GOOD",
+    "trades": 1503,
+    "hold_expR": 0.0377,
+    "mode": "fast"
+  },
+  {
+    "id": "29a6d538e643",
+    "date": "2026-08-15 20:21",
+    "score": 85,
+    "verdict": "EXCELLENT",
+    "trades": 1503,
+    "hold_expR": 0.0377,
+    "mode": "deep"
+  },
+  {
+    "id": "22c73933cb07",
+    "date": "2026-08-15 20:29",
+    "score": 85,
+    "verdict": "EXCELLENT",
+    "trades": 1503,
+    "hold_expR": 0.0377,
+    "mode": "deep"
+  },
+  {
+    "id": "069950161b6f",
+    "date": "2026-08-15 20:30",
+    "score": 85,
+    "verdict": "EXCELLENT",
+    "trades": 1503,
+    "hold_expR": 0.0377,
+    "mode": "deep"
+  },
+  {
+    "id": "00774ef2f66c",
+    "date": "2026-08-15 22:11",
+    "score": 45,
+    "verdict": "WEAK",
+    "trades": 626,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "32e621d772b4",
+    "date": "2026-08-15 22:12",
+    "score": 43,
+    "verdict": "WEAK",
+    "trades": 626,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "5eedb0e5ece7",
+    "date": "2026-08-15 22:12",
+    "score": 69,
+    "verdict": "PROMISING",
+    "trades": 1503,
+    "hold_expR": 0.0377,
+    "mode": "deep"
+  },
+  {
+    "id": "c42f78e6c83c",
+    "date": "2026-08-15 22:13",
+    "score": 85,
+    "verdict": "EXCELLENT",
+    "trades": 1503,
+    "hold_expR": 0.0377,
+    "mode": "deep"
+  },
+  {
+    "id": "3c41d99e1427",
+    "date": "2026-08-15 22:14",
+    "score": 43,
+    "verdict": "WEAK",
+    "trades": 626,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "124bbbf11f5b",
+    "date": "2026-08-15 22:16",
+    "score": 45,
+    "verdict": "WEAK",
+    "trades": 88,
+    "hold_expR": -0.412,
+    "mode": "deep"
+  },
+  {
+    "id": "aeb53707787b",
+    "date": "2026-08-15 22:20",
+    "score": 69,
+    "verdict": "PROMISING",
+    "trades": 2837,
+    "hold_expR": 0.079,
+    "mode": "deep"
+  },
+  {
+    "id": "ddf25c83043b",
+    "date": "2026-08-15 22:21",
+    "score": 59,
+    "verdict": "PROMISING",
+    "trades": 2837,
+    "hold_expR": 0.079,
+    "mode": "deep"
+  },
+  {
+    "id": "cdc779328321",
+    "date": "2026-08-15 22:22",
+    "score": 69,
+    "verdict": "PROMISING",
+    "trades": 2837,
+    "hold_expR": 0.079,
+    "mode": "deep"
+  },
+  {
+    "id": "7edc349e296d",
+    "date": "2026-08-15 22:23",
+    "score": 85,
+    "verdict": "EXCELLENT",
+    "trades": 1272,
+    "hold_expR": 0.0872,
+    "mode": "deep"
+  },
+  {
+    "id": "11512ccaa147",
+    "date": "2026-08-15 22:24",
+    "score": 85,
+    "verdict": "EXCELLENT",
+    "trades": 1749,
+    "hold_expR": 0.0504,
+    "mode": "deep"
+  },
+  {
+    "id": "57c2fbd2807c",
+    "date": "2026-08-15 22:26",
+    "score": 0,
+    "verdict": "FAILED",
+    "trades": 484,
+    "hold_expR": -0.3571,
+    "mode": "deep"
+  },
+  {
+    "id": "fcc1c057dd2d",
+    "date": "2026-08-15 22:26",
+    "score": 85,
+    "verdict": "EXCELLENT",
+    "trades": 1728,
+    "hold_expR": 0.0795,
+    "mode": "deep"
+  },
+  {
+    "id": "ff2672679c41",
+    "date": "2026-08-15 22:30",
+    "score": 85,
+    "verdict": "EXCELLENT",
+    "trades": 1728,
+    "hold_expR": 0.0795,
+    "mode": "deep"
+  },
+  {
+    "id": "1a11fdb34ef2",
+    "date": "2026-08-15 22:50",
+    "score": 85,
+    "verdict": "EXCELLENT",
+    "trades": 2467,
+    "hold_expR": 0.0904,
+    "mode": "deep"
+  },
+  {
+    "id": "245da200279a",
+    "date": "2026-08-15 22:50",
+    "score": 85,
+    "verdict": "EXCELLENT",
+    "trades": 2467,
+    "hold_expR": 0.0904,
+    "mode": "deep"
+  },
+  {
+    "id": "075533e78f37",
+    "date": "2026-08-16 00:03",
+    "score": 0,
+    "verdict": "FAILED",
+    "trades": 7327,
+    "hold_expR": -0.0597,
+    "mode": "deep"
+  },
+  {
+    "id": "104b292b9c41",
+    "date": "2026-08-16 00:04",
+    "score": 45,
+    "verdict": "WEAK",
+    "trades": 5985,
+    "hold_expR": 0.1178,
+    "mode": "deep"
+  },
+  {
+    "id": "e351a25157df",
+    "date": "2026-08-16 00:04",
+    "score": 25,
+    "verdict": "BAD",
+    "trades": 2231,
+    "hold_expR": 0.033,
+    "mode": "deep"
+  },
+  {
+    "id": "dfc5edc0a6cd",
+    "date": "2026-08-16 00:06",
+    "score": 23,
+    "verdict": "FAILED",
+    "trades": 385,
+    "hold_expR": -0.1463,
+    "mode": "deep"
+  },
+  {
+    "id": "4c6a53e6d0f9",
+    "date": "2026-08-16 00:11",
+    "score": 45,
+    "verdict": "WEAK",
+    "trades": 3733,
+    "hold_expR": 0.0567,
+    "mode": "deep"
+  },
+  {
+    "id": "f0ff1d78d013",
+    "date": "2026-08-16 00:12",
+    "score": 85,
+    "verdict": "EXCELLENT",
+    "trades": 1799,
+    "hold_expR": 0.0696,
+    "mode": "deep"
+  },
+  {
+    "id": "703995b9bc4c",
+    "date": "2026-08-16 00:13",
+    "score": 38,
+    "verdict": "BAD",
+    "trades": 1398,
+    "hold_expR": -0.0143,
+    "mode": "deep"
+  },
+  {
+    "id": "c650361fe25c",
+    "date": "2026-08-16 00:14",
+    "score": 85,
+    "verdict": "EXCELLENT",
+    "trades": 2772,
+    "hold_expR": 0.0375,
+    "mode": "deep"
+  },
+  {
+    "id": "a683dca009b3",
+    "date": "2026-08-16 00:16",
+    "score": 45,
+    "verdict": "WEAK",
+    "trades": 1852,
+    "hold_expR": 0.2347,
+    "mode": "deep"
+  },
+  {
+    "id": "7d5f4e01b140",
+    "date": "2026-08-16 00:19",
+    "score": 85,
+    "verdict": "EXCELLENT",
+    "trades": 1749,
+    "hold_expR": 0.0504,
+    "mode": "deep"
+  }
+]

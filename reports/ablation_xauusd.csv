@@ -1,0 +1,12 @@
+config,n,expR,t
+BASE (session breakout only),758,0.01738196871212797,0.40527505082483123
++ trend filter (EMA50/200),402,0.09147744120419526,1.5010304028809625
++ ranging filter only,642,0.006983862961517268,0.148879726301238
++ liquidity sweep only,3,,
++ reversal confirm only,758,0.01738196871212797,0.40527505082483123
++ order block only,265,-0.015375434750753529,-0.21674782186324754
+trend + ranging,345,0.05399175509061307,0.8157577553542869
+trend + sweep,0,,
+sweep + reversal,3,,
+trend+range+sweep+rev,0,,
+ALL FILTERS,0,,
