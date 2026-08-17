@@ -4,6 +4,62 @@
 import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+LOGIN_USERNAME = "ahmad"
+LOGIN_PASSWORD = "Ahmizay"
+
+LOGIN_PAGE = """<!doctype html><html><head><meta charset="utf-8">
+<title>PropLab Login</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,#0f172a,#111827 40%,#1f2937);font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;color:#e5e7eb}
+.card{width:min(420px,90vw);background:rgba(15,23,42,.88);border:1px solid rgba(148,163,184,.25);border-radius:16px;padding:28px 28px 20px;box-shadow:0 25px 60px rgba(0,0,0,.35)}
+h1{margin:0 0 8px;font-size:26px;letter-spacing:.5px}
+p{margin:0 0 20px;color:#a5b4cf}
+label{display:block;font-size:12px;color:#9fb0c4;margin:12px 0 6px;text-transform:uppercase;letter-spacing:.7px}
+input{width:100%;background:#0b1120;border:1px solid #334155;color:#f8fafc;border-radius:10px;padding:12px 14px;font-size:15px}
+input:focus{outline:none;border-color:#60a5fa;box-shadow:0 0 0 3px rgba(96,165,250,.18)}
+button{margin-top:18px;width:100%;padding:12px 16px;border:0;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;font-weight:700;cursor:pointer}
+button:hover{background:linear-gradient(135deg,#2563eb,#1d4ed8)}
+.error{margin-top:14px;padding:10px 12px;background:rgba(127,29,29,.35);border:1px solid rgba(248,113,113,.45);border-radius:10px;color:#fecaca;display:none}
+.status{margin-top:10px;font-size:12px;color:#93c5fd}
+</style></head><body>
+  <div class="card">
+    <h1>PropLab Access</h1>
+    <p>Enter your credentials to continue.</p>
+    <form id="loginForm">
+      <label for="username">Username</label>
+      <input id="username" name="username" type="text" autocomplete="username" required>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <button type="submit">Log in</button>
+    </form>
+    <div id="error" class="error"></div>
+  </div>
+<script>
+const form = document.getElementById('loginForm');
+const error = document.getElementById('error');
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  error.style.display = 'none';
+  const body = JSON.stringify({
+    username: document.getElementById('username').value.trim(),
+    password: document.getElementById('password').value
+  });
+  const res = await fetch('/api/login', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok && data.ok) {
+    window.location.reload();
+    return;
+  }
+  error.textContent = data.message || 'Invalid username or password.';
+  error.style.display = 'block';
+});
+</script></body></html>"""
+
 PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
 <title>Quant Strategy Tester</title>
 <style>
@@ -375,9 +431,38 @@ def make_handler(app):
             self.end_headers()
             self.wfile.write(b)
 
+        def _auth_ok(self):
+            cookie = self.headers.get("Cookie", "")
+            for part in cookie.split(";"):
+                key, sep, value = part.partition("=")
+                if sep and key.strip() == "prop_lab_auth" and value.strip() == "true":
+                    return True
+            return False
+
+        def _require_auth(self):
+            if self._auth_ok():
+                return True
+            self._send(401, json.dumps({"ok": False, "error": "UNAUTHORIZED",
+                                       "message": "Login required."}))
+            return False
+
         def do_GET(self):
-            if self.path == "/":
-                return self._send(200, PAGE, "text/html; charset=utf-8")
+            if self.path in ("/", "/login"):
+                if self.path == "/" and self._auth_ok():
+                    return self._send(200, PAGE, "text/html; charset=utf-8")
+                return self._send(200, LOGIN_PAGE, "text/html; charset=utf-8")
+            if self.path == "/logout":
+                self.send_response(200)
+                self.send_header("Set-Cookie", "prop_lab_auth=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT")
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(LOGIN_PAGE.encode("utf-8"))
+                return
+            if not self.path.startswith("/api/"):
+                self._send(404, "{}")
+                return
+            if not self._require_auth():
+                return
             if self.path == "/api/init":
                 cfg = app.load_cfg()
                 return self._send(200, json.dumps(
@@ -389,8 +474,33 @@ def make_handler(app):
 
         def do_POST(self):
             ln = int(self.headers.get("Content-Length", 0))
-            try: body = json.loads(self.rfile.read(ln) or "{}")
-            except Exception: body = {}
+            raw = self.rfile.read(ln) or b"{}"
+            content_type = self.headers.get("Content-Type", "")
+            try:
+                if "application/x-www-form-urlencoded" in content_type:
+                    from urllib.parse import parse_qs
+                    body = {k: v[0] if isinstance(v, list) and len(v) == 1 else v
+                            for k, v in parse_qs(raw.decode("utf-8")).items()}
+                else:
+                    body = json.loads(raw.decode("utf-8") or "{}")
+            except Exception:
+                body = {}
+
+            if self.path == "/api/login":
+                username = str(body.get("username", "")).strip()
+                password = str(body.get("password", "")).strip()
+                if username == LOGIN_USERNAME and password == LOGIN_PASSWORD:
+                    self.send_response(200)
+                    self.send_header("Set-Cookie", "prop_lab_auth=true; Path=/; HttpOnly; SameSite=Lax")
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"ok": True}).encode("utf-8"))
+                    return
+                return self._send(401, json.dumps({"ok": False, "error": "UNAUTHORIZED",
+                                                 "message": "Invalid username or password."}))
+
+            if not self._require_auth():
+                return
             if self.path == "/api/config":
                 cfg = app.load_cfg(); cfg.update(body); app.save_cfg(cfg)
                 return self._send(200, json.dumps({"ok": True}))
