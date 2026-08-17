@@ -73,20 +73,19 @@ DEFAULT_CFG = {
 
 # ----------------------------------------------------------------------------
 def load_cfg():
+    cfg = dict(DEFAULT_CFG)
     if os.path.exists(CFG_F):
         try:
-            cfg = {**DEFAULT_CFG, **json.load(open(CFG_F))}
+            cfg.update(json.load(open(CFG_F)))
         except Exception:
-            cfg = dict(DEFAULT_CFG)
-    else:
-        cfg = dict(DEFAULT_CFG)
-    # Allow overriding the dataset directory with an environment variable (useful on hosts)
-    try:
-        env_dir = os.environ.get("DATA_DIR")
-        if env_dir:
-            cfg["dataset_dir"] = env_dir
-    except Exception:
-        pass
+            pass
+    # SELF-HEAL: a saved dataset_dir may be an absolute path from another machine
+    # (e.g. a Windows path saved locally, then run on a Linux host like Render).
+    # If it does not exist here, fall back to the data/ folder bundled next to
+    # this app - which is where the repo keeps the CSVs.
+    d = cfg.get("dataset_dir", "")
+    if not d or not os.path.isdir(d):
+        cfg["dataset_dir"] = DATA
     return cfg
 
 
@@ -1171,11 +1170,7 @@ HELP = {
 
 # ============================== ENTRY POINT ================================
 if __name__ == "__main__":
-    import tester_ui, sys as _s, os as _os
+    import tester_ui, sys as _s
 
-    # Read PORT from environment (Render sets $PORT). Default to 5000 for local runs.
-    try:
-        _port = int(_os.environ.get("PORT", "5000"))
-    except Exception:
-        _port = 5000
-    tester_ui.serve(_s.modules[__name__], _port, "0.0.0.0")
+    # port comes from $PORT on cloud hosts, else 5000 locally
+    tester_ui.serve(_s.modules[__name__])

@@ -2,39 +2,9 @@
 # Imported by tester_app.py — kept separate so the HTML/JS never collides with
 # shell heredocs during editing.
 import json
-import socket
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-
-def get_local_ips():
-    ips = []
-    try:
-        for family, *_ in socket.getaddrinfo(socket.gethostname(), None, type=socket.SOCK_STREAM):
-            addr = family
-            if isinstance(family, tuple):
-                addr = family[0]
-            if hasattr(family, "__len__") and isinstance(family, tuple):
-                addr = family[0]
-        infos = socket.getaddrinfo(socket.gethostname(), None, type=socket.SOCK_STREAM)
-        for family, _, _, _, sockaddr in infos:
-            ip = sockaddr[0]
-            if ip and "." in ip and not ip.startswith("127.") and not ip.startswith("169.254."):
-                if ip not in ips:
-                    ips.append(ip)
-    except Exception:
-        pass
-    if not ips:
-        try:
-            ip = socket.gethostbyname(socket.gethostname())
-            if ip and "." in ip and not ip.startswith("127."):
-                ips = [ip]
-        except Exception:
-            ips = []
-    return ips
-
-
 PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Quant Strategy Tester</title>
 <style>
 *{box-sizing:border-box}
@@ -77,29 +47,6 @@ th{color:#93a0b0;font-weight:500;font-size:11px;text-transform:uppercase}
 canvas{width:100%;height:180px;background:#0b0e12;border-radius:8px;border:1px solid #232932}
 .pill{padding:3px 9px;border-radius:20px;font-size:12px;font-weight:600}
 .ok{background:#12361f;color:#7ee2a0}.bad{background:#3a1618;color:#ff9b9b}
-@media (max-width: 720px){
-  .wrap{padding:12px}
-  h1{font-size:18px;margin-bottom:12px}
-  .bar{padding:10px 12px;align-items:stretch}
-  .bar > div{width:100%}
-  .bar button{flex:1; justify-content:center}
-  .bar .sm{margin-left:0}
-  .card,.err,.warn{padding:12px}
-  textarea{height:260px;font-size:12px}
-  .grid{grid-template-columns:1fr 1fr}
-  .m .val{font-size:18px}
-  .verdict .s{font-size:42px}
-  .verdict .v{font-size:26px}
-  .row{flex-direction:column;align-items:flex-start}
-  button.big{padding:14px 16px;font-size:16px}
-}
-@media (max-width: 480px){
-  .grid{grid-template-columns:1fr}
-  .bar{flex-direction:column}
-  .bar > div{display:flex;flex-wrap:wrap;gap:8px}
-  .bar button{width:100%}
-  .bar .sm{margin-left:0}
-}
 </style></head><body><div class="wrap">
 <h1>QUANT STRATEGY TESTER</h1>
 
@@ -426,10 +373,14 @@ def make_handler(app):
     return Handler
 
 
-def serve(app, port=5000, host="0.0.0.0"):
+def serve(app, port=None):
+    import os
+    # Cloud hosts (Render/Railway/Heroku) inject the port via $PORT and require
+    # binding to 0.0.0.0. Locally, $PORT is unset and we use 5000 on all
+    # interfaces (still reachable at http://127.0.0.1:5000).
+    env_port = os.environ.get("PORT", "").strip()
+    port = int(env_port) if env_port.isdigit() else (port or 5000)
+    host = "0.0.0.0"
     print("\n  QUANT STRATEGY TESTER")
-    print(f"  Local: http://127.0.0.1:{port}")
-    for ip in get_local_ips():
-        print(f"  LAN:   http://{ip}:{port}")
-    print("  Press Ctrl+C to stop.\n")
+    print(f"  Listening on {host}:{port}  (local: http://127.0.0.1:{port})\n")
     HTTPServer((host, port), make_handler(app)).serve_forever()
