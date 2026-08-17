@@ -516,10 +516,17 @@ def metrics(tr):
     expR = float(R.mean())
     recomposed = win_rate * avg_win + (1 - win_rate) * avg_loss
     consistent = abs(recomposed - expR) < 1e-9
+    # A degenerate trade set (every R identical, e.g. a wrong-side stop losing
+    # 1R every time) gives se == 0 -> t == +-inf, which json.dump writes as
+    # `Infinity` and the browser's JSON.parse then rejects, blanking the report.
+    # Keep t finite so a broken strategy still renders its (bad) numbers.
+    t_stat = (R.mean() / se) if se > 0 else 0.0
+    if not np.isfinite(t_stat):
+        t_stat = 0.0
     return dict(
         n=int(len(R)),
         expR=expR,
-        t=float(R.mean() / se),
+        t=float(t_stat),
         pf=float(min(pf, 9.99)),
         pf_R=float(min(pf, 9.99)),          # identical by construction (R == P&L unit)
         win=float(100 * win_rate),
