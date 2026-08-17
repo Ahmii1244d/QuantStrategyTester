@@ -237,10 +237,47 @@ ck("changing risk per trade changes the simulation",
    f"0.10%: pass{r_lo['prop']['p1_pass']}/ml{r_lo['prop']['fail_maxloss']}  "
    f"1.00%: pass{r_hi['prop']['p1_pass']}/ml{r_hi['prop']['fail_maxloss']}")
 
+print("\n=== sequential (real-order) challenge + honest calendar days ===")
+Pm=rmt["prop"]
+ck("sequential challenge reported", Pm.get("seq_pass") is not None,
+   f"seq_pass={Pm.get('seq_pass')}% over {Pm.get('seq_starts')} starts")
+ck("sequential uses every trade as a start point",
+   Pm.get("seq_starts")==rmt["edge"]["trades"],
+   f"{Pm.get('seq_starts')} starts vs {rmt['edge']['trades']} trades")
+ck("trades/year reported", Pm.get("trades_per_year") is not None, str(Pm.get("trades_per_year")))
+# days-to-pass must be CALENDAR days: with ~6.5 years of data a strategy needing
+# ~200 trades cannot honestly claim to finish in a couple of months.
+if Pm.get("p1_med_trades") and Pm.get("p1_typ_days"):
+    implied=Pm["p1_med_trades"]/max(Pm["p1_typ_days"],1)
+    ck("days-to-pass derived from CALENDAR time, not active days",
+       implied <= (rmt["edge"]["trades"]/ (365.25*6.0)) * 1.5 + 0.5,
+       f"{Pm['p1_med_trades']} trades in {Pm['p1_typ_days']} days = {implied:.2f}/day")
+
+print("\n=== holdout significance gate (a lucky handful is not an edge) ===")
+w_all={"n":300,"expR":0.13,"pf":1.2,"win":32.0,"sharpe":0.4,"t":1.1}
+w_dev={"n":150,"expR":0.10,"t":0.9}; w_val={"n":60,"expR":0.20,"t":1.4}
+w_bench={"long":-0.06,"short":-0.02,"primary":-0.06,"aligned":"long","edge":0.19}
+w_mc={"pass_pct":78.0,"fail_maxloss":8.0,"fail_daily":0.0}
+w_mc2={"pass_pct":84.0,"fail_maxloss":6.0,"fail_daily":0.0}
+w_cost=[{"mult":1.0,"expR":0.13,"pos":True},{"mult":3.0,"expR":0.13,"pos":True}]
+# big-looking holdout, but only 29 trades and t below 2 -> must NOT read as clear edge
+lucky={"n":29,"expR":0.569,"t":1.73}
+s_l,v_l,r_l,f_l=A.prop_score(w_all,w_dev,w_val,lucky,w_mc,w_mc2,w_cost,w_bench,-0.04,A.EXEC_UNCERTAINTY_R)
+ck("big holdout with t<2 is NOT treated as a clear edge", f_l["hold_ok"] is False,
+   f"expR +0.569 on 29 trades, t 1.73 -> hold_ok={f_l['hold_ok']}")
+ck("...and it cannot be labelled EXCELLENT", v_l[1]!="EXCELLENT", v_l[1])
+# same expectancy, properly powered sample -> should pass
+solid={"n":97,"expR":0.515,"t":2.91}
+s_s,v_s,r_s,f_s=A.prop_score(w_all,w_dev,w_val,solid,w_mc,w_mc2,w_cost,w_bench,-0.04,A.EXEC_UNCERTAINTY_R)
+ck("same edge on a properly powered holdout DOES pass", f_s["hold_ok"] is True,
+   f"expR +0.515 on 97 trades, t 2.91 -> hold_ok={f_s['hold_ok']}")
+ck("significance gate raises the score, not lowers it", s_s > s_l, f"{s_l} -> {s_s}")
+
 print("\n=== scoring machinery: a genuine edge CAN still score high (positive control) ===")
 # feed prop_score synthetic inputs describing a real, benchmark-beating edge:
-g_all ={"n":600,"expR":0.30,"pf":1.9,"win":55.0,"sharpe":1.5}
-g_dev ={"n":360,"expR":0.30}; g_val={"n":120,"expR":0.28}; g_hold={"n":120,"expR":0.26}
+g_all ={"n":600,"expR":0.30,"pf":1.9,"win":55.0,"sharpe":1.5,"t":4.2}
+g_dev ={"n":360,"expR":0.30,"t":3.6}; g_val={"n":120,"expR":0.28,"t":2.4}
+g_hold={"n":120,"expR":0.26,"t":2.6}
 g_mc  ={"pass_pct":85.0,"fail_maxloss":3.0,"fail_daily":1.0}
 g_mc2 ={"pass_pct":90.0,"fail_maxloss":2.0,"fail_daily":1.0}
 g_cost=[{"mult":1.0,"expR":0.30,"pos":True},{"mult":2.0,"expR":0.20,"pos":True},{"mult":3.0,"expR":0.12,"pos":True}]

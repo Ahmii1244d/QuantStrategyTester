@@ -604,6 +604,59 @@ def prop_sim_days(tr, cfg, phase="phase1", cap=None):
             "path": path, "worst": min(path), "taken": taken}
 
 
+def sequential_challenge(tr, cfg, phase="phase1"):
+    """Start a challenge at EVERY historical trade and run forward in the REAL
+    order. The bootstrap Monte Carlo shuffles trades, which silently breaks up
+    real losing clusters; a strategy whose losses arrive in a bad run (a quiet
+    regime, a trend that stops working) looks far safer under bootstrap than it
+    would have been in practice. This keeps the actual sequence and reports
+    honest CALENDAR time, so 'how long would this really take' is answerable."""
+    if len(tr) < 10:
+        return None
+    R = tr.R.values
+    exit_days = pd.to_datetime(tr.exit).dt.date.values
+    entry_t = pd.to_datetime(tr.entry).values
+    bal0 = cfg["balance"]
+    unit = bal0 * cfg["risk_pct"] / 100.0
+    tgt = cfg[phase] / 100.0
+    dd = cfg["daily_loss"] / 100.0
+    floor = bal0 * (1 - cfg["max_loss"] / 100.0)
+    out = {"PASS": 0, "FAIL_MAXLOSS": 0, "FAIL_DAILY": 0, "TIMEOUT": 0}
+    cal_days, n_trades = [], []
+    for start in range(len(R)):
+        bal = bal0
+        day = None
+        day_start = bal
+        res, end_i = "TIMEOUT", len(R) - 1
+        for k in range(start, len(R)):
+            if exit_days[k] != day:
+                day = exit_days[k]
+                day_start = bal
+            bal += R[k] * unit
+            if bal <= day_start * (1 - dd):
+                res, end_i = "FAIL_DAILY", k; break
+            if bal <= floor:
+                res, end_i = "FAIL_MAXLOSS", k; break
+            if bal >= bal0 * (1 + tgt):
+                res, end_i = "PASS", k; break
+        out[res] += 1
+        if res == "PASS":
+            cal_days.append(int((entry_t[end_i] - entry_t[start])
+                                / np.timedelta64(1, "D")))
+            n_trades.append(k - start + 1)
+    tot = max(sum(out.values()), 1)
+    return dict(
+        pass_pct=100 * out["PASS"] / tot,
+        fail_maxloss=100 * out["FAIL_MAXLOSS"] / tot,
+        fail_daily=100 * out["FAIL_DAILY"] / tot,
+        timeout=100 * out["TIMEOUT"] / tot,
+        starts=tot,
+        med_cal_days=int(np.median(cal_days)) if cal_days else None,
+        worst_cal_days=int(np.max(cal_days)) if cal_days else None,
+        med_trades=int(np.median(n_trades)) if n_trades else None,
+    )
+
+
 def monte_carlo(tr, cfg, nsims=1000, phase="phase1", seed=7):
     """Bootstrap the trade sequence; run the CONFIGURED prop rules each time.
 
@@ -782,10 +835,15 @@ def prop_score(md_all, dev, val, hold, mc, mc2, cost_rows, bench, inv_expR, exec
     both = p1 * p2 / 100.0
     cost3x = next((c["expR"] for c in cost_rows if abs(c["mult"] - 3.0) < 1e-9), None)
     hold_n, hold_e = hold["n"], hold["expR"]
+    hold_t = hold.get("t", 0.0)
     edge = bench["edge"]                      # strategy expR - aligned-benchmark expR
 
     # ---- edge gates: none of these depend on trade count or market drift ----
-    hold_ok = hold_n >= 15 and hold_e > thr
+    # Holdout must clear the noise floor AND be statistically distinguishable
+    # from zero. A big-looking +0.57R on 29 trades whose 95% CI still spans 0 is
+    # not evidence; requiring t >= 2 stops a lucky handful of wins reading as
+    # "CLEAR EDGE".
+    hold_ok = hold_n >= 15 and hold_e > thr and hold_t >= 2.0
     bench_ok = edge > thr
     cost_ok = (cost3x is not None) and (cost3x > 0.0)
     inv_ok = inv_expR < -thr                 # mirror clearly loses -> directional edge is real
@@ -813,9 +871,13 @@ def prop_score(md_all, dev, val, hold, mc, mc2, cost_rows, bench, inv_expR, exec
     if hold_n < 15:
         reasons.append(("⚠", f"Holdout sample small ({hold_n} trades) — unseen-data edge unconfirmed"))
     elif hold_ok:
-        reasons.append(("✓", f"Holdout edge {hold_e:+.3f}R clears the {thr}R execution-noise floor"))
-    else:
+        reasons.append(("✓", f"Holdout edge {hold_e:+.3f}R on {hold_n} trades (t {hold_t:+.2f}) "
+                             f"clears the {thr}R noise floor and is significant"))
+    elif hold_e <= thr:
         reasons.append(("✗", f"Holdout {hold_e:+.3f}R is within execution noise ({thr}R) — NO CLEAR EDGE"))
+    else:
+        reasons.append(("✗", f"Holdout {hold_e:+.3f}R looks large but t is only {hold_t:+.2f} on "
+                             f"{hold_n} trades — could be luck, NOT yet an established edge"))
     if bench_ok:
         reasons.append(("✓", f"Beats {bench['aligned']}-only drift benchmark by {edge:+.3f}R"))
     else:
@@ -830,8 +892,11 @@ def prop_score(md_all, dev, val, hold, mc, mc2, cost_rows, bench, inv_expR, exec
         reasons.append(("⚠", f"Only {dev['n']} development trades — thin sample"))
 
     # ---- HARD CAPS (the anti-gaming rules the user asked for) ----
-    if hold_n >= 15 and hold_e <= thr:
-        s = min(s, 45)                       # tiny/negative holdout can't score high
+    if hold_n >= 15 and not hold_ok:
+        # covers BOTH a holdout inside the noise floor and one that merely looks
+        # big on too few trades (t < 2). Without this a lucky +0.57R on 29 trades
+        # scored in the 80s while being labelled NO CLEAR EDGE - a contradiction.
+        s = min(s, 45)
     if not bench_ok:
         s = min(s, 45)                       # gold-drift / long-only guard
     if not cost_ok:
@@ -985,6 +1050,8 @@ def run_test(code, cfg, mode="fast", progress=None):
     mc = monte_carlo(tr, cfg, nsims=nsims, phase="phase1")
     step("Prop Monte Carlo (phase 2)", 80)
     mc2 = monte_carlo(tr, cfg, nsims=nsims, phase="phase2")
+    step("Sequential (real-order) challenge", 83)
+    seq = sequential_challenge(tr, cfg, phase="phase1")
 
     step("Cost stress", 86)
     cost_mults = (1.0, 1.5, 2.0, 3.0) if deep else (1.0, 2.0, 3.0)
@@ -1068,11 +1135,17 @@ def run_test(code, cfg, mode="fast", progress=None):
     # === PROP CHALLENGE SIMULATION BLOCK ==================================
     # Everything the user asked to see, all derived from the CONFIGURED account
     # settings (cfg) so it recomputes whenever those settings change.
+    # CALENDAR days, not "days on which it happened to trade". A selective
+    # strategy may trade on only 170 distinct dates spread across 6 years;
+    # dividing by active days made "typical days to pass" read ~59 when the
+    # honest answer was ~2 years. Always convert through calendar time.
     active_days = int(pd.to_datetime(tr.entry).dt.date.nunique())
-    tpd = md_all["n"] / max(active_days, 1)     # trades per active trading day
+    cal_span = max(int((pd.to_datetime(tr.entry).max()
+                        - pd.to_datetime(tr.entry).min()).days), 1)
+    tr_per_cal_day = md_all["n"] / cal_span
 
     def _days_for(n_tr):
-        return int(round(n_tr / tpd)) if (n_tr and tpd > 0) else None
+        return int(round(n_tr / tr_per_cal_day)) if (n_tr and tr_per_cal_day > 0) else None
 
     prop = {
         "start": cfg["balance"],
@@ -1096,12 +1169,24 @@ def run_test(code, cfg, mode="fast", progress=None):
         "typ_streak": mc["typ_streak"] if mc else None,
         "worst_streak": mc["worst_streak"] if mc else None,
         "nsims": mc["nsims"] if mc else None,
+        "trades_per_year": round(md_all["n"] / (cal_span / 365.25), 1),
+        "active_days": active_days,
+        # time-ordered reality check (see sequential_challenge)
+        "seq_pass": round(seq["pass_pct"]) if seq else None,
+        "seq_maxloss": round(seq["fail_maxloss"]) if seq else None,
+        "seq_timeout": round(seq["timeout"]) if seq else None,
+        "seq_starts": seq["starts"] if seq else None,
+        "seq_med_days": seq["med_cal_days"] if seq else None,
+        "seq_worst_days": seq["worst_cal_days"] if seq else None,
+        "seq_med_trades": seq["med_trades"] if seq else None,
     }
     edge = {
         "dev": round(md_dev["expR"], 4),
         "val": round(md_val["expR"], 4),
         "hold": round(md_hold["expR"], 4),
         "hold_n": md_hold["n"],
+        "hold_t": round(md_hold["t"], 2),
+        "overall_t": round(md_all["t"], 2),
         "pf": round(md_all["pf"], 2),
         "win": round(md_all["win"], 1),
         "sharpe": round(md_all["sharpe"], 2),

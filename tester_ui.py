@@ -272,7 +272,26 @@ function render(r){
      +'<tr><td>Worst trading days: <b>'+dash(P.p1_worst_days)+'</b></td>'
         +'<td></td>'
         +'<td>Worst losing streak: <b>'+dash(P.worst_streak)+'</b></td></tr>'
-     +'</table></div></div>';
+     +'</table></div>'
+     +'<div style="font-size:11px;color:#5b6675;margin-top:6px">Trade frequency: '
+       +dash(P.trades_per_year)+' trades/year &middot; days above are CALENDAR days</div>'
+     +(P.seq_pass===null||P.seq_pass===undefined?'':
+        '<div style="margin-top:14px;padding-top:12px;border-top:1px solid #242a33">'
+        +'<div style="font-size:12px;color:#93a0b0;margin-bottom:8px">REALITY CHECK &mdash; SEQUENTIAL (real trade order)'
+        +H('hsq','The Monte Carlo above shuffles your trades, which breaks up real losing clusters. This instead starts a challenge at every historical trade and runs forward in the ACTUAL order. If it is much worse than the shuffled number, your losses arrive in runs and the shuffled odds are too optimistic.')+'</div>'
+        +'<div class="grid">'
+        +'<div class="m"><div class="lab">Phase 1 pass (real order)</div><div class="val" style="color:'
+          +((P.seq_pass>=P.p1_pass-10)?'#7ee2a0':'#ff9b9b')+'">'+fmtpct(P.seq_pass)+'</div></div>'
+        +'<div class="m"><div class="lab">Hit max loss</div><div class="val">'+fmtpct(P.seq_maxloss)+'</div></div>'
+        +'<div class="m"><div class="lab">Never reached target</div><div class="val">'+fmtpct(P.seq_timeout)+'</div></div>'
+        +'<div class="m"><div class="lab">Median time to pass</div><div class="val" style="font-size:18px">'
+          +dash(P.seq_med_days)+' days</div></div>'
+        +'</div>'
+        +((P.seq_pass < P.p1_pass - 10)?'<div class="warn" style="margin:10px 0 0">Shuffled odds ('
+           +fmtpct(P.p1_pass)+') are much better than real-order odds ('+fmtpct(P.seq_pass)
+           +'). Your losing trades arrive in clusters, so trust the sequential number.</div>':'')
+        +'</div>')
+     +'</div>';
   }
 
   // ============ STRATEGY EDGE (is it real, or drift?) ============
@@ -282,8 +301,10 @@ function render(r){
      +'<div class="row"><span>Development expectancy</span><b style="color:'+rcol(E.dev)+'">'+E.dev+'R</b></div>'
      +'<div class="row"><span>Validation expectancy</span><b style="color:'+rcol(E.val)+'">'+E.val+'R</b></div>'
      +'<div class="row"><span>Holdout expectancy '+H('heo','Unseen data the strategy was never tuned on. Compared against this engine\'s execution-noise floor, not just zero.')+'</span>'
-        +'<b>'+E.hold+'R &middot; '+E.hold_n+' trades '
+        +'<b>'+E.hold+'R &middot; '+E.hold_n+' trades &middot; t '+dash(E.hold_t)+' '
         +(noEdge?'<span class="pill bad">'+E.hold_quality+'</span>':'<span class="pill ok">CLEAR EDGE</span>')+'</b></div>'
+     +'<div class="row"><span>Overall t-stat '+H('hot','How far the full-sample expectancy sits from zero in standard errors. Under about 2 the result is not statistically distinguishable from luck, however good the average looks.')+'</span>'
+        +'<b style="color:'+((E.overall_t>=2)?'#7ee2a0':'#ffd88a')+'">'+dash(E.overall_t)+'</b></div>'
      +'<div class="row"><span>Profit factor</span><b>'+E.pf+'</b></div>'
      +'<div class="row"><span>Win rate</span><b>'+E.win+'%</b></div>'
      +'<div class="row"><span>Sharpe</span><b>'+E.sharpe+'</b></div>'
