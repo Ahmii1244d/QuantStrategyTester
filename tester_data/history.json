@@ -1,122 +1,5 @@
 [
   {
-    "id": "054e93611f64",
-    "date": "2026-08-13 16:01",
-    "score": 25,
-    "verdict": "BAD",
-    "trades": 1245,
-    "hold_expR": 0.0385,
-    "mode": "deep"
-  },
-  {
-    "id": "8aa5f48c7628",
-    "date": "2026-08-13 16:01",
-    "score": 25,
-    "verdict": "BAD",
-    "trades": 1245,
-    "hold_expR": 0.0385,
-    "mode": "deep"
-  },
-  {
-    "id": "8b8631e2ed9f",
-    "date": "2026-08-13 16:06",
-    "score": 90,
-    "verdict": "EXCELLENT",
-    "trades": 1406,
-    "hold_expR": 0.446,
-    "mode": "deep"
-  },
-  {
-    "id": "1ef722b20061",
-    "date": "2026-08-13 16:07",
-    "score": 90,
-    "verdict": "EXCELLENT",
-    "trades": 1406,
-    "hold_expR": 0.446,
-    "mode": "deep"
-  },
-  {
-    "id": "12cfb4363adb",
-    "date": "2026-08-13 16:09",
-    "score": 76,
-    "verdict": "GOOD",
-    "trades": 1406,
-    "hold_expR": 0.446,
-    "mode": "fast"
-  },
-  {
-    "id": "adea9858421a",
-    "date": "2026-08-13 16:20",
-    "score": 76,
-    "verdict": "GOOD",
-    "trades": 1406,
-    "hold_expR": 0.446,
-    "mode": "fast"
-  },
-  {
-    "id": "f99a2c878545",
-    "date": "2026-08-13 16:25",
-    "score": 76,
-    "verdict": "GOOD",
-    "trades": 1406,
-    "hold_expR": 0.446,
-    "mode": "fast"
-  },
-  {
-    "id": "2385c9f57075",
-    "date": "2026-08-13 16:25",
-    "score": 37,
-    "verdict": "BAD",
-    "trades": 1245,
-    "hold_expR": 0.0385,
-    "mode": "fast"
-  },
-  {
-    "id": "49c00ae9f36e",
-    "date": "2026-08-13 16:25",
-    "score": 27,
-    "verdict": "BAD",
-    "trades": 14539,
-    "hold_expR": -0.0021,
-    "mode": "fast"
-  },
-  {
-    "id": "7ef3effec7d1",
-    "date": "2026-08-13 16:30",
-    "score": 37,
-    "verdict": "BAD",
-    "trades": 1245,
-    "hold_expR": 0.0385,
-    "mode": "fast"
-  },
-  {
-    "id": "d59f003c92a6",
-    "date": "2026-08-13 16:30",
-    "score": 27,
-    "verdict": "BAD",
-    "trades": 14539,
-    "hold_expR": -0.0021,
-    "mode": "fast"
-  },
-  {
-    "id": "e5c6b54dc936",
-    "date": "2026-08-13 16:32",
-    "score": 37,
-    "verdict": "BAD",
-    "trades": 1245,
-    "hold_expR": 0.0385,
-    "mode": "fast"
-  },
-  {
-    "id": "52c440ce2199",
-    "date": "2026-08-13 16:32",
-    "score": 37,
-    "verdict": "BAD",
-    "trades": 1245,
-    "hold_expR": 0.0385,
-    "mode": "fast"
-  },
-  {
     "id": "897bad89786c",
     "date": "2026-08-13 16:32",
     "score": 35,
@@ -898,5 +781,122 @@
     "trades": 1749,
     "hold_expR": 0.0504,
     "mode": "deep"
+  },
+  {
+    "id": "5d41f5817dc7",
+    "date": "2026-08-17 04:33",
+    "score": 15,
+    "verdict": "NO CLEAR EDGE",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "fast"
+  },
+  {
+    "id": "a16117ed455e",
+    "date": "2026-08-17 04:33",
+    "score": 15,
+    "verdict": "NO CLEAR EDGE",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "fast"
+  },
+  {
+    "id": "a1eaada64e04",
+    "date": "2026-08-17 04:33",
+    "score": 15,
+    "verdict": "NO CLEAR EDGE",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "a535e65caa01",
+    "date": "2026-08-17 04:33",
+    "score": 45,
+    "verdict": "NO CLEAR EDGE",
+    "trades": 1780,
+    "hold_expR": 0.0438,
+    "mode": "fast"
+  },
+  {
+    "id": "17381a7f3244",
+    "date": "2026-08-17 04:33",
+    "score": 15,
+    "verdict": "NO CLEAR EDGE",
+    "trades": 17695,
+    "hold_expR": -0.0207,
+    "mode": "fast"
+  },
+  {
+    "id": "0738c60f9ca9",
+    "date": "2026-08-17 04:33",
+    "score": 15,
+    "verdict": "NO CLEAR EDGE",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "a2c1583dc39f",
+    "date": "2026-08-17 04:33",
+    "score": 15,
+    "verdict": "NO CLEAR EDGE",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "6a163c399025",
+    "date": "2026-08-17 04:33",
+    "score": 15,
+    "verdict": "NO CLEAR EDGE",
+    "trades": 1245,
+    "hold_expR": 0.0385,
+    "mode": "deep"
+  },
+  {
+    "id": "9067eca9d0be",
+    "date": "2026-08-17 04:34",
+    "score": 45,
+    "verdict": "NO CLEAR EDGE",
+    "trades": 1780,
+    "hold_expR": 0.0438,
+    "mode": "fast"
+  },
+  {
+    "id": "0e32d0676f78",
+    "date": "2026-08-17 04:34",
+    "score": 45,
+    "verdict": "NO CLEAR EDGE",
+    "trades": 1780,
+    "hold_expR": 0.0438,
+    "mode": "fast"
+  },
+  {
+    "id": "0c4c9a17628a",
+    "date": "2026-08-17 04:34",
+    "score": 33,
+    "verdict": "NO CLEAR EDGE",
+    "trades": 1780,
+    "hold_expR": 0.0438,
+    "mode": "fast"
+  },
+  {
+    "id": "3ae8b4a45da1",
+    "date": "2026-08-17 04:34",
+    "score": 23,
+    "verdict": "NO CLEAR EDGE",
+    "trades": 1780,
+    "hold_expR": 0.0438,
+    "mode": "fast"
+  },
+  {
+    "id": "6e3d6b954b96",
+    "date": "2026-08-17 04:34",
+    "score": 36,
+    "verdict": "NO CLEAR EDGE",
+    "trades": 1780,
+    "hold_expR": 0.0438,
+    "mode": "fast"
   }
 ]

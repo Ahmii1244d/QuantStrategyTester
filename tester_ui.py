@@ -150,6 +150,9 @@ async function test(mode){
 }
 function H(k,t){return '<span class="q" onclick="q(\''+k+'\')">?</span><div class="hint" id="'+k+'">'+t+'</div>'}
 function pill(v){return v?'<span class="pill ok">POSITIVE</span>':'<span class="pill bad">NEGATIVE</span>'}
+function fmtpct(v){return (v===null||v===undefined)?'&mdash;':v+'%'}
+function dash(v){return (v===null||v===undefined)?'&mdash;':v}
+function rcol(v){return (v>0)?'#7ee2a0':(v<0?'#ff9b9b':'#c3cede')}
 function render(r){
   const o=document.getElementById('out');
   if(r.error){
@@ -178,22 +181,68 @@ function render(r){
   }
   h+='<div class="card verdict"><div class="v">'+r.verdict[0]+' '+r.verdict[1]+'</div>'
    +'<div style="font-size:12px;color:#93a0b0;margin-top:10px">PROP SCORE'
-   +H('hs','One number combining profit, out-of-sample survival, drawdown and prop pass odds. A negative holdout caps it low.')
+   +H('hs','Primarily the probability of passing YOUR configured challenge, plus robustness: holdout edge by magnitude, survival at 3x cost, and outperformance vs a drift benchmark. Raw trade count and a fixed RR earn nothing; failing the edge gates caps the score and labels it NO CLEAR EDGE.')
    +'</div><div class="s">'+r.score+'<span style="font-size:22px;color:#5b6675">/100</span></div></div>';
 
-  if(r.phase1!==null && r.phase1!==undefined){
-    h+='<div class="card"><div style="font-size:12px;color:#93a0b0;margin-bottom:10px">CAN THIS PASS MY CHALLENGE?'
-     +H('hp','Estimated chance of hitting the profit target before breaking a drawdown rule, from 1,000 simulations.')
-     +'</div><div class="grid">'
-     +'<div class="m"><div class="lab">Phase 1</div><div class="val">'+r.phase1+'%</div></div>'
-     +'<div class="m"><div class="lab">Phase 2</div><div class="val">'+r.phase2+'%</div></div>'
-     +'<div class="m"><div class="lab">Both phases</div><div class="val">'+r.both+'%</div></div>'
-     +'<div class="m"><div class="lab">Risk: max loss</div><div class="val">'+r.risk_maxloss+'%</div></div>'
-     +'<div class="m"><div class="lab">Risk: daily loss</div><div class="val">'+r.risk_daily+'%</div></div>'
-     +'</div></div>';
-  } else {
-    h+='<div class="card" style="text-align:center;color:#93a0b0">Prop pass probability, Monte Carlo and cost stress '
-     +'run in <b style="color:#c3cede">DEEP VALIDATION</b>. Fast test skips them for speed.</div>';
+  // ============ PROP CHALLENGE SIMULATION (the headline product) ============
+  if(r.prop){ const P=r.prop;
+    h+='<div class="card" style="border-color:#2f4a86">'
+     +'<div style="font-size:14px;color:#8ab4f8;font-weight:700;letter-spacing:.4px;margin-bottom:3px">PROP CHALLENGE SIMULATION</div>'
+     +'<div style="font-size:11px;color:#5b6675;margin-bottom:12px">'+dash(P.nsims)+' Monte-Carlo challenges on YOUR configured account &middot; every number below recomputes when you change ACCOUNT SETTINGS</div>'
+     +'<div class="grid" style="margin-bottom:12px">'
+     +'<div class="m"><div class="lab">Starting balance</div><div class="val" style="font-size:18px">$'+Number(P.start).toLocaleString()+'</div></div>'
+     +'<div class="m"><div class="lab">Risk / trade</div><div class="val" style="font-size:18px">'+P.risk_pct+'%</div></div>'
+     +'<div class="m"><div class="lab">Phase 1 / 2 target</div><div class="val" style="font-size:18px">'+P.phase1_tgt+'% / '+P.phase2_tgt+'%</div></div>'
+     +'<div class="m"><div class="lab">Daily / Max loss</div><div class="val" style="font-size:18px">'+P.daily_loss+'% / '+P.max_loss+'%</div></div>'
+     +'</div>'
+     +'<div class="grid">'
+     +'<div class="m"><div class="lab">Phase 1 pass'+H('hp1','Chance of reaching the Phase-1 target before a max-loss or daily-loss breach, over the Monte-Carlo challenges.')+'</div><div class="val">'+fmtpct(P.p1_pass)+'</div></div>'
+     +'<div class="m"><div class="lab">Phase 2 pass</div><div class="val">'+fmtpct(P.p2_pass)+'</div></div>'
+     +'<div class="m"><div class="lab">Pass BOTH phases</div><div class="val" style="color:#8ab4f8">'+fmtpct(P.both_pass)+'</div></div>'
+     +'<div class="m"><div class="lab">Hit max loss first</div><div class="val" style="color:#ff9b9b">'+fmtpct(P.fail_maxloss)+'</div></div>'
+     +'<div class="m"><div class="lab">Daily-loss breach</div><div class="val" style="color:#ff9b9b">'+fmtpct(P.fail_daily)+'</div></div>'
+     +'</div>'
+     +'<div style="margin-top:14px"><table>'
+     +'<tr><th>Phase 1</th><th>Phase 2</th><th>Risk profile</th></tr>'
+     +'<tr><td>Typical trades to pass: <b>'+dash(P.p1_med_trades)+'</b></td>'
+        +'<td>Typical trades to pass: <b>'+dash(P.p2_med_trades)+'</b></td>'
+        +'<td>Typical drawdown: <b>'+dash(P.typ_dd)+'%</b></td></tr>'
+     +'<tr><td>Worst-case trades: <b>'+dash(P.p1_worst_trades)+'</b></td>'
+        +'<td></td>'
+        +'<td>Worst drawdown: <b>'+dash(P.worst_dd)+'%</b></td></tr>'
+     +'<tr><td>Typical trading days: <b>'+dash(P.p1_typ_days)+'</b></td>'
+        +'<td></td>'
+        +'<td>Typical losing streak: <b>'+dash(P.typ_streak)+'</b></td></tr>'
+     +'<tr><td>Worst trading days: <b>'+dash(P.p1_worst_days)+'</b></td>'
+        +'<td></td>'
+        +'<td>Worst losing streak: <b>'+dash(P.worst_streak)+'</b></td></tr>'
+     +'</table></div></div>';
+  }
+
+  // ============ STRATEGY EDGE (is it real, or drift?) ============
+  if(r.edge){ const E=r.edge; const noEdge=(''+E.hold_quality).indexOf('NO CLEAR')>=0;
+    h+='<div class="card"><div style="font-size:14px;color:#8ab4f8;font-weight:700;letter-spacing:.4px;margin-bottom:4px">STRATEGY EDGE</div>'
+     +'<div style="font-size:11px;color:#5b6675;margin-bottom:10px">A real edge beats the aligned drift benchmark AND its own inverse loses. Positive expectancy alone is not enough.</div>'
+     +'<div class="row"><span>Development expectancy</span><b style="color:'+rcol(E.dev)+'">'+E.dev+'R</b></div>'
+     +'<div class="row"><span>Validation expectancy</span><b style="color:'+rcol(E.val)+'">'+E.val+'R</b></div>'
+     +'<div class="row"><span>Holdout expectancy '+H('heo','Unseen data the strategy was never tuned on. Compared against this engine\'s execution-noise floor, not just zero.')+'</span>'
+        +'<b>'+E.hold+'R &middot; '+E.hold_n+' trades '
+        +(noEdge?'<span class="pill bad">'+E.hold_quality+'</span>':'<span class="pill ok">CLEAR EDGE</span>')+'</b></div>'
+     +'<div class="row"><span>Profit factor</span><b>'+E.pf+'</b></div>'
+     +'<div class="row"><span>Win rate</span><b>'+E.win+'%</b></div>'
+     +'<div class="row"><span>Sharpe</span><b>'+E.sharpe+'</b></div>'
+     +'<div class="row"><span>Trade count</span><b>'+E.trades+'</b></div>'
+     +'<div class="row"><span>Expectancy at 3x cost</span><b style="color:'+rcol(E.cost3x)+'">'+dash(E.cost3x)+'R</b></div>'
+     +'<div class="row"><span>Benchmark expectancy ('+E.bench_aligned+'-only drift)</span><b>'+E.bench+'R</b></div>'
+     +'<div class="row"><span><b>Edge vs benchmark</b> '+H('hev','Strategy expectancy minus the matched always-'+E.bench_aligned+' benchmark. If this is ~0, the strategy is just riding drift (e.g. gold\'s uptrend), not timing anything.')+'</span>'
+        +'<b style="color:'+rcol(E.edge_vs_bench)+'">'+E.edge_vs_bench+'R</b></div>'
+     +'<div class="row"><span>Inverted-strategy expectancy (BUY&#8596;SELL)</span><b style="color:'+rcol(-E.inverted)+'">'+E.inverted+'R</b></div>'
+     +'<div style="font-size:11px;color:#5b6675;margin-top:8px">Long-only drift '+E.bench_long+'R &middot; Short-only drift '+E.bench_short+'R</div>'
+     +'</div>';
+  }
+
+  if(r.edge_ok===false){
+    h+='<div class="warn"><b>NO CLEAR EDGE</b><br>This strategy may still make money in the backtest, but it does not clearly beat the drift benchmark, its holdout edge, its inverse, or realistic costs. Passing the prop simulation here would not be reliable evidence of a repeatable edge.</div>';
   }
   if(r.exec_sensitive){
     h+='<div class="warn"><b>EXECUTION-SENSITIVE</b> ('+String(r.exec_threshold)+'R)<br>'
@@ -239,12 +288,6 @@ function render(r){
    +'<div class="row"><span>Development <span style="color:#5b6675">'+r.split_dates.dev+'</span></span><span>'+s.dev.expR+'R &middot; '+s.dev.n+' trades '+pill(s.dev.pos)+'</span></div>'
    +'<div class="row"><span>Validation <span style="color:#5b6675">'+r.split_dates.val+'</span></span><span>'+s.val.expR+'R &middot; '+s.val.n+' trades '+pill(s.val.pos)+'</span></div>'
    +'<div class="row"><span><b>Holdout</b> <span style="color:#5b6675">'+r.split_dates.hold+'</span></span><span>'+s.hold.expR+'R &middot; '+s.hold.n+' trades '+pill(s.hold.pos)+'</span></div></div>';
-
-  if(r.mc) h+='<div class="card"><div style="font-size:12px;color:#93a0b0;margin-bottom:8px">MONTE CARLO (1,000 simulations)</div>'
-   +'<div class="row"><span>Chance of reaching target</span><b>'+Math.round(r.mc.pass_pct)+'%</b></div>'
-   +'<div class="row"><span>Chance of breaking max loss</span><b>'+Math.round(r.mc.fail_maxloss)+'%</b></div>'
-   +'<div class="row"><span>Worst expected drawdown</span><b>'+r.mc.worst_dd.toFixed(1)+'%</b></div>'
-   +'<div class="row"><span>Typical losing streak</span><b>'+r.mc.typ_streak+' trades</b></div></div>';
 
   if(r.cost&&r.cost.length){
     h+='<div class="card"><div style="font-size:12px;color:#93a0b0;margin-bottom:8px">COST TEST</div>';

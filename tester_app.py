@@ -438,6 +438,40 @@ def backtest(direction, stop, rr, df, cost_pts, pt, max_hold=576, cost_mult=1.0)
     )
 
 
+# ----------------------------------------------------------------------------
+# CONTROL TESTS — is the "edge" real, or just the instrument's drift?
+# ----------------------------------------------------------------------------
+def benchmark_metrics(strat_dir, data, base_tf, cost_pts, pt, side):
+    """Drift-only control. Fire on a fixed cadence (trade count matched to the
+    strategy) with the SAME ATR-stop / RR=2 mechanics, ALL one direction:
+    side=+1 always-long, side=-1 always-short. A long-only system that merely
+    rides an uptrend (e.g. gold) will roughly TIE this benchmark; a strategy
+    with real timing edge will clearly beat it."""
+    df = data[base_tf]
+    c = df["close"].to_numpy(dtype=float)
+    a = df["atr"].to_numpy(dtype=float)
+    n = len(df)
+    n_strat = int(np.count_nonzero(strat_dir))
+    step = max(1, n // max(n_strat, 1))            # comparable number of trades
+    d = np.zeros(n)
+    s = np.full(n, np.nan)
+    rr = np.full(n, 2.0)
+    for i in range(300, n, step):
+        d[i] = side
+        s[i] = c[i] - 1.5 * a[i] if side > 0 else c[i] + 1.5 * a[i]
+    return metrics(backtest(d, s, rr, df, cost_pts, pt))
+
+
+def invert_signals(direction, stop, data, base_tf):
+    """Flip BUY<->SELL and reflect each stop across its signal-bar close so the
+    risk distance is preserved (a long stop below becomes a short stop the same
+    distance above). If a strategy has a genuine directional edge, running its
+    exact inverse must be clearly LOSING; if the inverse ties or wins, the
+    'edge' is not coming from correct directional calls."""
+    c = data[base_tf]["close"].to_numpy(dtype=float)
+    return -np.asarray(direction, dtype=float), 2.0 * c - np.asarray(stop, dtype=float)
+
+
 def split_trades(tr, base):
     lo, hi = base.time.min(), base.time.max()
     span = (hi - lo).days
@@ -563,41 +597,48 @@ def prop_sim_days(tr, cfg, phase="phase1", cap=None):
             "path": path, "worst": min(path), "taken": taken}
 
 
-def monte_carlo(tr, cfg, nsims=1000, phase="phase1"):
-    """Bootstrap the trade sequence; run prop rules each time."""
+def monte_carlo(tr, cfg, nsims=1000, phase="phase1", seed=7):
+    """Bootstrap the trade sequence; run the CONFIGURED prop rules each time.
+
+    Fixed-fractional of the INITIAL balance (never compounds), so this answers
+    the only question that matters for a challenge: starting from $balance under
+    THESE rules, what is the probability of reaching THIS phase target before a
+    max-loss or daily-loss breach? Also returns the distribution of trades needed
+    to pass, drawdown, and losing-streak stats. All numbers recompute whenever the
+    account settings change - nothing here is hardcoded."""
     if len(tr) < 10:
         return None
     R = tr.R.values
-    days = pd.to_datetime(tr.exit).dt.date.values
     bal0 = cfg["balance"]
     risk = cfg["risk_pct"] / 100.0
     tgt = cfg[phase] / 100.0
     dd = cfg["daily_loss"] / 100.0
     mx = cfg["max_loss"] / 100.0
     floor = bal0 * (1 - mx)
-    rng = np.random.default_rng(7)
+    unit = bal0 * risk                       # $ risked per 1R, constant (no compounding)
+    rng = np.random.default_rng(seed)
     outcomes = {"PASS": 0, "FAIL_MAXLOSS": 0, "FAIL_DAILY": 0, "TIMEOUT": 0}
     dds = []
     streaks = []
-    horizon = min(len(R), 300)
+    to_pass = []                             # trades needed on the runs that passed
+    horizon = min(len(R), 400)
     for _ in range(nsims):
-        idx = rng.integers(0, len(R), horizon)
-        seq = R[idx]
+        seq = R[rng.integers(0, len(R), horizon)]
         bal = bal0
         ds = bal
         peak = bal
-        mdd = 0
-        day_len = rng.integers(2, 6)
+        mdd = 0.0
+        day_len = int(rng.integers(2, 6))
         res = "TIMEOUT"
         strk = 0
         mstrk = 0
-        for k, rr in enumerate(seq):
+        for k, r in enumerate(seq):
             if k % day_len == 0:
                 ds = bal
-            bal += rr * (bal0 * risk)
+            bal += r * unit
             peak = max(peak, bal)
             mdd = max(mdd, (peak - bal) / peak)
-            strk = strk + 1 if rr < 0 else 0
+            strk = strk + 1 if r < 0 else 0
             mstrk = max(mstrk, strk)
             if bal <= ds * (1 - dd):
                 res = "FAIL_DAILY"
@@ -607,18 +648,25 @@ def monte_carlo(tr, cfg, nsims=1000, phase="phase1"):
                 break
             if bal >= bal0 * (1 + tgt):
                 res = "PASS"
+                to_pass.append(k + 1)
                 break
         outcomes[res] += 1
         dds.append(mdd * 100)
         streaks.append(mstrk)
     tot = sum(outcomes.values())
+    passed = to_pass if to_pass else None
     return dict(
         pass_pct=100 * outcomes["PASS"] / tot,
         fail_maxloss=100 * outcomes["FAIL_MAXLOSS"] / tot,
         fail_daily=100 * outcomes["FAIL_DAILY"] / tot,
         timeout=100 * outcomes["TIMEOUT"] / tot,
         worst_dd=float(np.percentile(dds, 95)),
+        typ_dd=float(np.median(dds)),
         typ_streak=int(np.median(streaks)),
+        worst_streak=int(np.percentile(streaks, 95)),
+        med_trades=int(np.median(passed)) if passed else None,
+        worst_trades=int(np.percentile(passed, 95)) if passed else None,
+        nsims=int(nsims),
     )
 
 
@@ -701,81 +749,109 @@ def lookahead_check(Strat, data, base_tf, build_log=None, d_full=None):
 
 
 # ----------------------------------------------------------------------------
-def prop_score(dev, val, hold, mc, cost_ok):
-    """0-100. Hard rule: negative holdout expectancy cannot score high."""
-    s = 50.0
+def prop_score(md_all, dev, val, hold, mc, mc2, cost_rows, bench, inv_expR, exec_thr):
+    """0-100, PROP-CHALLENGE FIRST.
+
+    The score primarily measures the probability of passing the configured
+    challenge, plus robustness gates that a drift-riding or over-fit strategy
+    cannot fake:
+
+      * pass probability (both phases)      - the actual objective
+      * holdout edge by MAGNITUDE           - +0.001R is not rewarded like +0.20R
+      * survival at 3x cost
+      * outperformance vs the aligned drift benchmark  (anti gold-drift)
+      * risk of ruin (max-loss / daily-loss odds)
+      * stability across dev/val/hold
+      * inversion collapse (a real edge's mirror must lose)
+
+    Deliberately NOT rewarded: raw trade count, a fixed RR, or a barely-positive
+    holdout. A strategy that makes money but fails the edge gates is labelled
+    'NO CLEAR EDGE' rather than EXCELLENT."""
+    thr = exec_thr
     reasons = []
-    if val["expR"] > 0:
-        s += 6
-        reasons.append(("✓", "Validation positive"))
+
+    p1 = mc["pass_pct"] if mc else 0.0
+    p2 = mc2["pass_pct"] if mc2 else 0.0
+    both = p1 * p2 / 100.0
+    cost3x = next((c["expR"] for c in cost_rows if abs(c["mult"] - 3.0) < 1e-9), None)
+    hold_n, hold_e = hold["n"], hold["expR"]
+    edge = bench["edge"]                      # strategy expR - aligned-benchmark expR
+
+    # ---- edge gates: none of these depend on trade count or market drift ----
+    hold_ok = hold_n >= 15 and hold_e > thr
+    bench_ok = edge > thr
+    cost_ok = (cost3x is not None) and (cost3x > 0.0)
+    inv_ok = inv_expR < -thr                 # mirror clearly loses -> directional edge is real
+    edge_ok = hold_ok and bench_ok and cost_ok
+
+    def c01(x):
+        return max(0.0, min(1.0, x))
+
+    # ---- weighted sub-scores (each 0..1), weights sum to 100 ----
+    s_prop = c01(both / 100.0)                                  # 30  both-phase odds
+    s_p1 = c01(p1 / 100.0)                                      # 10  phase-1 odds
+    s_hold = c01((hold_e - thr) / (0.20 - thr)) if hold_n >= 15 else 0.0  # 18 by magnitude
+    s_cost = c01((cost3x if cost3x is not None else -1.0) / (2 * thr))    # 8
+    s_bench = c01(edge / (2 * thr))                            # 18  anti-drift
+    s_stab = sum(1 for m in (dev, val, hold) if m["n"] >= 10 and m["expR"] > thr) / 3.0  # 8
+    ruin = (mc["fail_maxloss"] + mc["fail_daily"]) if mc else 100.0
+    s_risk = c01(1.0 - ruin / 100.0)                           # 8
+
+    s = (30 * s_prop + 10 * s_p1 + 18 * s_hold + 8 * s_cost +
+         18 * s_bench + 8 * s_stab + 8 * s_risk)
+
+    # ---- human-readable reasons ----
+    reasons.append(("✓" if both >= 40 else "✗", f"Pass-both-phases odds {both:.0f}%"))
+    reasons.append(("✓" if p1 >= 50 else "⚠", f"Phase-1 pass odds {p1:.0f}%"))
+    if hold_n < 15:
+        reasons.append(("⚠", f"Holdout sample small ({hold_n} trades) — unseen-data edge unconfirmed"))
+    elif hold_ok:
+        reasons.append(("✓", f"Holdout edge {hold_e:+.3f}R clears the {thr}R execution-noise floor"))
     else:
-        s -= 12
-        reasons.append(("✗", "Validation negative"))
-    if hold["n"] >= 15:
-        if hold["expR"] > 0:
-            s += 10
-            reasons.append(("✓", "Holdout positive"))
-        else:
-            s -= 18
-            reasons.append(("✗", "Holdout NEGATIVE"))
+        reasons.append(("✗", f"Holdout {hold_e:+.3f}R is within execution noise ({thr}R) — NO CLEAR EDGE"))
+    if bench_ok:
+        reasons.append(("✓", f"Beats {bench['aligned']}-only drift benchmark by {edge:+.3f}R"))
     else:
-        reasons.append(("⚠", "Holdout sample small"))
-    pf = dev["pf"]
-    if pf > 1.4:
-        s += 10
-        reasons.append(("✓", f"Profit factor {pf:.2f}"))
-    elif pf > 1.2:
-        s += 5
-        reasons.append(("✓", f"Profit factor {pf:.2f}"))
-    elif pf < 1.0:
-        s -= 10
-        reasons.append(("✗", f"Profit factor {pf:.2f} (<1)"))
-    if dev["t"] > 3:
-        s += 8
-        reasons.append(("✓", f"t-stat {dev['t']:.1f} (significant)"))
-    elif dev["t"] < 0:
-        s -= 6
-    if dev["n"] >= 200:
-        s += 5
-        reasons.append(("✓", f"{dev['n']} development trades"))
-    elif dev["n"] < 50:
-        s -= 8
-        reasons.append(("⚠", f"Only {dev['n']} development trades"))
-    if mc:
-        if mc["pass_pct"] > 60:
-            s += 10
-            reasons.append(("✓", f"Prop pass {mc['pass_pct']:.0f}%"))
-        elif mc["pass_pct"] > 40:
-            s += 4
-            reasons.append(("⚠", f"Prop pass {mc['pass_pct']:.0f}%"))
-        else:
-            s -= 6
-            reasons.append(("✗", f"Prop pass only {mc['pass_pct']:.0f}%"))
-    if cost_ok is True:
-        s += 4
-        reasons.append(("✓", "Survives cost stress"))
-    elif cost_ok is False:
-        s -= 6
-        reasons.append(("✗", "Fails under higher costs"))
-    # HARD GATES
-    if hold["n"] >= 15 and hold["expR"] <= 0:
-        s = min(s, 38)
-    if pf < 1.0:
-        s = min(s, 45)
-    s = max(0, min(100, s))
-    if s >= 80:
+        reasons.append(("✗", f"Does NOT beat {bench['aligned']}-only drift benchmark (edge {edge:+.3f}R)"))
+    if cost3x is not None:
+        reasons.append(("✓" if cost_ok else "✗", f"Expectancy at 3x realistic cost {cost3x:+.3f}R"))
+    reasons.append(("✓" if inv_ok else "⚠",
+                    f"Inverted (BUY↔SELL) expectancy {inv_expR:+.3f}R "
+                    + ("— reverses as a real edge should" if inv_ok
+                       else "— does not clearly lose, so directional edge is weak")))
+    if dev["n"] < 30:
+        reasons.append(("⚠", f"Only {dev['n']} development trades — thin sample"))
+
+    # ---- HARD CAPS (the anti-gaming rules the user asked for) ----
+    if hold_n >= 15 and hold_e <= thr:
+        s = min(s, 45)                       # tiny/negative holdout can't score high
+    if not bench_ok:
+        s = min(s, 45)                       # gold-drift / long-only guard
+    if not cost_ok:
+        s = min(s, 45)                       # dies under realistic cost
+    if inv_expR >= md_all["expR"]:
+        s = min(s, 40)                       # its own inverse is as good or better
+    if dev["n"] < 30:
+        s = min(s, 55)                       # too few trades to trust
+    s = max(0.0, min(100.0, s))
+
+    # ---- verdict: edge gates decide the LABEL, score decides the tier ----
+    if not edge_ok:
+        verdict = ("🟠", "NO CLEAR EDGE")
+    elif s >= 80:
         verdict = ("🟢", "EXCELLENT")
-    elif s >= 70:
+    elif s >= 68:
         verdict = ("🟢", "GOOD")
     elif s >= 55:
         verdict = ("🟡", "PROMISING")
     elif s >= 40:
         verdict = ("🟠", "WEAK")
-    elif s >= 25:
-        verdict = ("🔴", "BAD")
     else:
-        verdict = ("🔴", "FAILED")
-    return round(s), verdict, reasons
+        verdict = ("🔴", "BAD")
+
+    flags = dict(hold_ok=hold_ok, bench_ok=bench_ok, cost_ok=cost_ok,
+                 inv_ok=inv_ok, edge_ok=edge_ok, both=both, p1=p1, p2=p2)
+    return round(s), verdict, reasons, flags
 
 
 # ----------------------------------------------------------------------------
@@ -893,26 +969,49 @@ def run_test(code, cfg, mode="fast", progress=None):
                 "msg": "Internal metric inconsistency (expectancy != win/loss decomposition).",
                 "hint": "This is an engine bug, not your strategy. Please report it."}
 
-    # --- DEEP-only heavy diagnostics (items 9, 22, 23) ---
-    mc = mc2 = None
-    cost_ok = None
-    cost_rows = []
-    if deep:
-        step("Monte Carlo (phase 1)", 78)
-        mc = monte_carlo(tr, cfg)
-        step("Monte Carlo (phase 2)", 85)
-        mc2 = monte_carlo(tr, cfg, phase="phase2")
-        step("Cost stress", 92)
-        t1 = time.perf_counter()
-        for m in (1.0, 1.5, 2.0, 3.0):
-            # reuse SAME signals; only the execution/P&L layer reruns (item 23)
-            t2 = backtest(direction, stop, rr, data[base_tf], cost, pt, cost_mult=m)
-            e = metrics(t2)["expR"]
-            cost_rows.append({"mult": m, "expR": round(e, 4), "pos": e > 0})
-        cost_ok = cost_rows[2]["pos"]  # survives 2x
-        timing["diagnostics"] = round(time.perf_counter() - t1, 3)
+    # === PROP MONTE CARLO + CONTROL TESTS (run in BOTH modes) =============
+    # The prop-challenge probability is the product this tester exists to
+    # deliver, so it is computed every time; DEEP only runs MORE simulations.
+    t1 = time.perf_counter()
+    nsims = 1500 if deep else 400
+    step("Prop Monte Carlo (phase 1)", 74)
+    mc = monte_carlo(tr, cfg, nsims=nsims, phase="phase1")
+    step("Prop Monte Carlo (phase 2)", 80)
+    mc2 = monte_carlo(tr, cfg, nsims=nsims, phase="phase2")
 
-    score, verdict, reasons = prop_score(md_dev, md_val, md_hold, mc, cost_ok)
+    step("Cost stress", 86)
+    cost_mults = (1.0, 1.5, 2.0, 3.0) if deep else (1.0, 2.0, 3.0)
+    cost_rows = []
+    for m in cost_mults:
+        # reuse the SAME signals; only the execution / P&L layer reruns
+        e = metrics(backtest(direction, stop, rr, data[base_tf], cost, pt, cost_mult=m))["expR"]
+        cost_rows.append({"mult": m, "expR": round(e, 4), "pos": e > 0})
+
+    step("Benchmarks + inversion", 90)
+    # Drift controls: always-long / always-short, matched trade count, same
+    # ATR-stop / RR mechanics. The strategy must BEAT the aligned benchmark.
+    bench_long = benchmark_metrics(direction, data, base_tf, cost, pt, +1)
+    bench_short = benchmark_metrics(direction, data, base_tf, cost, pt, -1)
+    long_ct = int(np.count_nonzero(direction > 0))
+    short_ct = int(np.count_nonzero(direction < 0))
+    aligned = "long" if long_ct >= short_ct else "short"
+    bench_primary = bench_long if aligned == "long" else bench_short
+    bench = {
+        "long": round(bench_long["expR"], 4),
+        "short": round(bench_short["expR"], 4),
+        "primary": round(bench_primary["expR"], 4),
+        "aligned": aligned,
+        "edge": round(md_all["expR"] - bench_primary["expR"], 4),
+    }
+    # Inversion: flip BUY<->SELL, reflect the stop, rerun the SAME fill engine.
+    d_inv, s_inv = invert_signals(direction, stop, data, base_tf)
+    inv_expR = round(metrics(backtest(d_inv, s_inv, rr, data[base_tf], cost, pt))["expR"], 4)
+    timing["diagnostics"] = round(time.perf_counter() - t1, 3)
+
+    score, verdict, reasons, edge_flags = prop_score(
+        md_all, md_dev, md_val, md_hold, mc, mc2, cost_rows, bench,
+        inv_expR, EXEC_UNCERTAINTY_R)
+    cost_ok = bool(edge_flags["cost_ok"])
     p1 = mc["pass_pct"] if mc else None
     p2 = mc2["pass_pct"] if mc2 else None
     both = (p1 * p2 / 100.0) if (p1 is not None and p2 is not None) else None
@@ -959,6 +1058,58 @@ def run_test(code, cfg, mode="fast", progress=None):
     # bust. Same fixed-fractional model as the Monte Carlo -> item 9 satisfied.
     acct = prop_sim_days(tr, cfg, phase="phase1")
 
+    # === PROP CHALLENGE SIMULATION BLOCK ==================================
+    # Everything the user asked to see, all derived from the CONFIGURED account
+    # settings (cfg) so it recomputes whenever those settings change.
+    active_days = int(pd.to_datetime(tr.entry).dt.date.nunique())
+    tpd = md_all["n"] / max(active_days, 1)     # trades per active trading day
+
+    def _days_for(n_tr):
+        return int(round(n_tr / tpd)) if (n_tr and tpd > 0) else None
+
+    prop = {
+        "start": cfg["balance"],
+        "risk_pct": cfg["risk_pct"],
+        "phase1_tgt": cfg["phase1"],
+        "phase2_tgt": cfg["phase2"],
+        "daily_loss": cfg["daily_loss"],
+        "max_loss": cfg["max_loss"],
+        "p1_pass": round(p1) if p1 is not None else None,
+        "p2_pass": round(p2) if p2 is not None else None,
+        "both_pass": round(both) if both is not None else None,
+        "p1_med_trades": mc.get("med_trades") if mc else None,
+        "p1_worst_trades": mc.get("worst_trades") if mc else None,
+        "p1_typ_days": _days_for(mc.get("med_trades")) if mc else None,
+        "p1_worst_days": _days_for(mc.get("worst_trades")) if mc else None,
+        "p2_med_trades": mc2.get("med_trades") if mc2 else None,
+        "fail_maxloss": round(mc["fail_maxloss"]) if mc else None,
+        "fail_daily": round(mc["fail_daily"]) if mc else None,
+        "typ_dd": round(mc["typ_dd"], 1) if mc else None,
+        "worst_dd": round(mc["worst_dd"], 1) if mc else None,
+        "typ_streak": mc["typ_streak"] if mc else None,
+        "worst_streak": mc["worst_streak"] if mc else None,
+        "nsims": mc["nsims"] if mc else None,
+    }
+    edge = {
+        "dev": round(md_dev["expR"], 4),
+        "val": round(md_val["expR"], 4),
+        "hold": round(md_hold["expR"], 4),
+        "hold_n": md_hold["n"],
+        "pf": round(md_all["pf"], 2),
+        "win": round(md_all["win"], 1),
+        "sharpe": round(md_all["sharpe"], 2),
+        "trades": md_all["n"],
+        "cost3x": next((c["expR"] for c in cost_rows if abs(c["mult"] - 3.0) < 1e-9), None),
+        "bench": bench["primary"],
+        "bench_aligned": bench["aligned"],
+        "bench_long": bench["long"],
+        "bench_short": bench["short"],
+        "edge_vs_bench": bench["edge"],
+        "inverted": inv_expR,
+        "hold_quality": ("clear edge" if edge_flags["hold_ok"]
+                         else "NO CLEAR EDGE / EXECUTION-SENSITIVE"),
+    }
+
     step("Finalizing", 97)
     timing["total"] = round(time.perf_counter() - t0, 3)
     # trade list (last 200)
@@ -989,6 +1140,11 @@ def run_test(code, cfg, mode="fast", progress=None):
         "both": round(both) if both is not None else None,
         "risk_maxloss": round(mc["fail_maxloss"]) if mc else None,
         "risk_daily": round(mc["fail_daily"]) if mc else None,
+        "prop": prop,
+        "edge": edge,
+        "benchmarks": bench,
+        "inversion": {"expR": inv_expR, "collapses": bool(edge_flags["inv_ok"])},
+        "edge_ok": bool(edge_flags["edge_ok"]),
         "metrics": {
             "pf": round(md_all["pf"], 2),          # PF of the FULL trade set (was dev-only)
             "expR": round(md_all["expR"], 4),

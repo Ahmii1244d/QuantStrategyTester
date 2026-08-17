@@ -60,8 +60,10 @@ rd=A.run_test(EMA,cfg,mode="deep"); td=rd["timing"]["total"]
 ck("A: EMA fast runs, no error", rf.get("ok"), rf.get("error",""))
 # compare engine-internal totals (excludes cold-cache CSV load); deep does strictly more work
 ck("H: fast faster than deep (warm)", tf < td, f"fast={tf:.2f}s deep={td:.2f}s")
-ck("fast skips Monte Carlo", rf.get("phase1") is None)
-ck("deep includes Monte Carlo", rd.get("phase1") is not None)
+ck("prop pass odds computed in BOTH modes",
+   rf.get("phase1") is not None and rd.get("phase1") is not None)
+ck("deep runs MORE simulations than fast",
+   rd["prop"]["nsims"] > rf["prop"]["nsims"], f"fast={rf['prop']['nsims']} deep={rd['prop']['nsims']}")
 ck("timing breakdown present", "total" in rf.get("timing",{}))
 
 print("\n=== metric consistency (F) ===")
@@ -166,8 +168,10 @@ ck("no compounding blow-up (research_final sane)",
    0 < rc["research_final"] < cfg["balance"]*50, f"${rc['research_final']}")
 ck("account sim uses prop rules (has outcome)",
    rc["account"].get("outcome") in ("PASS","FAIL_MAXLOSS","FAIL_DAILY","TIMEOUT"))
-ck("verdict trade reason labeled 'development'",
-   any("development" in x[1] for x in rc["reasons"] if "trade" in x[1].lower()))
+ck("reasons mention the drift benchmark comparison",
+   any("benchmark" in x[1].lower() for x in rc["reasons"]))
+ck("reasons mention holdout / unseen-data edge",
+   any("holdout" in x[1].lower() for x in rc["reasons"]))
 
 print("\n=== audit CATCHES a forced mismatch ===")
 import copy
@@ -190,6 +194,61 @@ ck("history row references the report id", any(x.get("id")==rid for x in A.load_
 A.delete_report(rid)
 ck("delete removes report + history row",
    A.load_report(rid) is None and not any(x.get("id")==rid for x in A.load_hist()))
+
+print("\n=== control tests: benchmarks + inversion (item 1,2,3,4) ===")
+rmt=A.run_test(MTF,cfg,mode="fast")     # the gold-drift long-every-40-bars 'strategy'
+ck("always-long + always-short benchmarks present",
+   "benchmarks" in rmt and {"long","short","edge","aligned"} <= set(rmt["benchmarks"].keys()),
+   str(rmt.get("benchmarks")))
+ck("strategy inversion computed", rmt.get("inversion",{}).get("expR") is not None,
+   str(rmt.get("inversion")))
+ck("edge block reports benchmark + inverted expectancy",
+   "edge" in rmt and "edge_vs_bench" in rmt["edge"] and "inverted" in rmt["edge"])
+
+print("\n=== a gold-drift long-only strategy CANNOT score high (item 7) ===")
+ck("drift long-only labelled 'NO CLEAR EDGE'", rmt["verdict"][1]=="NO CLEAR EDGE", rmt["verdict"][1])
+ck("drift edge_ok is False", rmt.get("edge_ok") is False)
+ck("drift score is not high (<55)", rmt["score"]<55, f"score={rmt['score']}")
+ck("drift only ties the benchmark (edge <= execution noise)",
+   rmt["edge"]["edge_vs_bench"] <= A.EXEC_UNCERTAINTY_R, f"edge={rmt['edge']['edge_vs_bench']}R")
+
+print("\n=== prop simulation uses the CONFIGURED account settings (item 6) ===")
+P=rmt["prop"]
+ck("prop block mirrors cfg balance/targets/limits/risk",
+   P["start"]==cfg["balance"] and P["phase1_tgt"]==cfg["phase1"] and P["phase2_tgt"]==cfg["phase2"]
+   and P["daily_loss"]==cfg["daily_loss"] and P["max_loss"]==cfg["max_loss"]
+   and P["risk_pct"]==cfg["risk_pct"],
+   f"start={P['start']} p1={P['phase1_tgt']} risk={P['risk_pct']}")
+
+print("\n=== settings dynamically change the results (item 3) ===")
+import copy
+cfg_easy=copy.deepcopy(cfg); cfg_easy["phase1"]=8.0
+cfg_hard=copy.deepcopy(cfg); cfg_hard["phase1"]=25.0        # much harder target
+r_easy=A.run_test(MTF,cfg_easy,mode="fast"); r_hard=A.run_test(MTF,cfg_hard,mode="fast")
+ck("raising Phase-1 target lowers pass odds",
+   r_hard["prop"]["p1_pass"] <= r_easy["prop"]["p1_pass"],
+   f"8%->{r_easy['prop']['p1_pass']}%   25%->{r_hard['prop']['p1_pass']}%")
+cfg_lo=copy.deepcopy(cfg); cfg_lo["risk_pct"]=0.10
+cfg_hi=copy.deepcopy(cfg); cfg_hi["risk_pct"]=1.00
+r_lo=A.run_test(MTF,cfg_lo,mode="fast"); r_hi=A.run_test(MTF,cfg_hi,mode="fast")
+ck("changing risk per trade changes the simulation",
+   (r_lo["prop"]["p1_pass"],r_lo["prop"]["fail_maxloss"]) !=
+   (r_hi["prop"]["p1_pass"],r_hi["prop"]["fail_maxloss"]),
+   f"0.10%: pass{r_lo['prop']['p1_pass']}/ml{r_lo['prop']['fail_maxloss']}  "
+   f"1.00%: pass{r_hi['prop']['p1_pass']}/ml{r_hi['prop']['fail_maxloss']}")
+
+print("\n=== scoring machinery: a genuine edge CAN still score high (positive control) ===")
+# feed prop_score synthetic inputs describing a real, benchmark-beating edge:
+g_all ={"n":600,"expR":0.30,"pf":1.9,"win":55.0,"sharpe":1.5}
+g_dev ={"n":360,"expR":0.30}; g_val={"n":120,"expR":0.28}; g_hold={"n":120,"expR":0.26}
+g_mc  ={"pass_pct":85.0,"fail_maxloss":3.0,"fail_daily":1.0}
+g_mc2 ={"pass_pct":90.0,"fail_maxloss":2.0,"fail_daily":1.0}
+g_cost=[{"mult":1.0,"expR":0.30,"pos":True},{"mult":2.0,"expR":0.20,"pos":True},{"mult":3.0,"expR":0.12,"pos":True}]
+g_bench={"long":0.05,"short":-0.05,"primary":0.05,"aligned":"long","edge":0.25}
+gs,gv,gr,gf=A.prop_score(g_all,g_dev,g_val,g_hold,g_mc,g_mc2,g_cost,g_bench,-0.25,A.EXEC_UNCERTAINTY_R)
+ck("clear-edge strategy scores high (>=80)", gs>=80, f"score={gs}")
+ck("clear-edge strategy labelled EXCELLENT/GOOD", gv[1] in ("EXCELLENT","GOOD"), gv[1])
+ck("clear-edge strategy edge_ok True", gf["edge_ok"] is True)
 
 print("\n" + "="*50)
 print(f"  RESULT: {PASS} passed, {FAIL} failed")
