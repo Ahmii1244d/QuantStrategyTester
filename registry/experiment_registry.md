@@ -100,3 +100,47 @@ the sweep, so it could not leak into selection. 28 variants tested on DEV+VAL.
 
 **Status: NOT VALIDATED.** Better-founded than v1, but the claim "survives any
 gold condition" rests on in-sample evidence and awaits an out-of-sample flat regime.
+
+---
+
+## Phase 10 — USDJPY replication test of the v2 pullback mechanism (2026-08-18)
+
+**Purpose:** gold data was exhausted by Phase 9 selection (v2's flat-regime fix was
+chosen by looking at gold's 2021–22). USDJPY is untouched by that design, and its
+own flat/down years (2020, 2025, 2026) are *different calendar years* from gold's,
+so it is an independent test of the mechanism — not of the instrument.
+
+**Pre-registered before running. 3 trials declared (v1, v2, v2-no-session).**
+Native USDJPY H4/D1 files present, so no timeframe building was required.
+
+| # | criterion | result | |
+|---|---|---|---|
+| 1 | v2 expR > +0.05 and t > 2.0 | expR +0.026, **t +0.28** | **FAIL** |
+| 2 | edge vs always-long > 0.04R | +0.074 | pass |
+| 3 | inverted < −0.04R | −0.110 | pass |
+| 4 | v2 positive in USDJPY flat years | **−0.640R (n=25)** | **FAIL** |
+| 5 | v2 beats v1 in flat years | −0.667 → −0.640 | pass (trivially) |
+
+**Verdict: the v2 pullback mechanism does NOT generalise. 3/5, and the two that
+failed are the two that mattered.**
+
+- Criterion 5 was a badly written criterion: both numbers are catastrophic, so
+  "v2 beats v1" is meaningless here. Recorded as a flaw in the test design, not
+  as supporting evidence.
+- v2 is *worse* than v1 on USDJPY overall (+0.160 → +0.026): the pullback entry
+  actively hurt on an instrument it was not fitted to.
+- Gold flat-years −0.192 → +0.120 (Phase 9) vs USDJPY flat-years −0.667 → −0.640.
+  The most parsimonious reading: **the Phase-9 flat-regime "fix" is an artifact of
+  selecting on gold's 2021–22**, not a general property.
+
+**What did survive on both instruments:** the inversion test (directional
+information is real) and beating the always-long benchmark. What did not: any
+claim to work outside a trend.
+
+**Reframing recorded for future work:** across both instruments this family loses
+in flat/range regimes (gold v1 −0.192, USDJPY v1 −0.667, USDJPY v2 −0.640). That
+is not a defect awaiting a fix — it is the defining behaviour of trend-following.
+Future effort should size around that property rather than try to filter it away.
+
+**Status: v2 remains NOT VALIDATED. Claim "survives any condition in gold" is
+FALSIFIED.**
