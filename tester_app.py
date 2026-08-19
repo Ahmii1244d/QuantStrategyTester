@@ -66,6 +66,7 @@ DEFAULT_CFG = {
     "max_loss": 10.0,
     "risk_pct": 0.25,
     "min_days": 0,
+    "best_day_pct": 0,      # Best Day Rule: best single day <= X% of total profit (0 = rule off)
     "consistency": 0,
     "hours": "",
 }
@@ -604,13 +605,64 @@ def prop_sim_days(tr, cfg, phase="phase1", cap=None):
             "path": path, "worst": min(path), "taken": taken}
 
 
-def sequential_challenge(tr, cfg, phase="phase1"):
-    """Start a challenge at EVERY historical trade and run forward in the REAL
-    order. The bootstrap Monte Carlo shuffles trades, which silently breaks up
-    real losing clusters; a strategy whose losses arrive in a bad run (a quiet
-    regime, a trend that stops working) looks far safer under bootstrap than it
-    would have been in practice. This keeps the actual sequence and reports
-    honest CALENDAR time, so 'how long would this really take' is answerable."""
+def _pctl(vals, q):
+    """Percentile of a list, or None when there is nothing to summarise."""
+    return int(np.percentile(vals, q)) if len(vals) else None
+
+
+def _run_phase(R, exit_days, start, bal0, unit, tgt_pct, dd_pct, floor,
+               min_days, best_day_pct):
+    """Run ONE phase forward from index `start` in the REAL trade order.
+
+    Returns (outcome, end_index, trades_used, trading_days_used). Honours the
+    configured minimum-trading-days rule and the Best Day rule: reaching the
+    target is not enough if either rule is still unsatisfied - the account keeps
+    trading, exactly as a real challenge would."""
+    bal = bal0
+    day = None
+    day_start = bal
+    used_days = set()
+    day_pnl = {}
+    n = len(R)
+    for k in range(start, n):
+        dk = exit_days[k]
+        if dk != day:
+            day = dk
+            day_start = bal
+        used_days.add(dk)
+        pnl = R[k] * unit
+        bal += pnl
+        day_pnl[dk] = day_pnl.get(dk, 0.0) + pnl
+        if bal <= day_start * (1 - dd_pct):
+            return "FAIL_DAILY", k, k - start + 1, len(used_days)
+        if bal <= floor:
+            return "FAIL_MAXLOSS", k, k - start + 1, len(used_days)
+        if bal >= bal0 * (1 + tgt_pct) and len(used_days) >= min_days:
+            if best_day_pct > 0:
+                profit = bal - bal0
+                pos = [v for v in day_pnl.values() if v > 0]
+                # Best Day rule: the largest winning day may not exceed
+                # best_day_pct of total profit. Not a failure - the trader must
+                # keep trading until the ratio complies, so we continue.
+                if profit > 0 and pos and (max(pos) / profit) > (best_day_pct / 100.0):
+                    continue
+            return "PASS", k, k - start + 1, len(used_days)
+    return "TIMEOUT", n - 1, n - start, len(used_days)
+
+
+def sequential_challenge(tr, cfg):
+    """FULL 2-STEP challenge in the REAL historical trade order.
+
+    Starts a challenge at every historical trade, runs Phase 1 forward through
+    the actual sequence, and - only for the paths that actually completed Phase
+    1 - continues into Phase 2 from the very next trade with the balance reset
+    to the starting balance (how a real 2-step works).
+
+    The bootstrap Monte Carlo shuffles trades, which breaks up real losing
+    clusters and flatters a regime-dependent strategy. This preserves them.
+
+    Phase-2 numbers here are CONDITIONAL on Phase 1 having passed. The full
+    2-step probability is measured directly, never inferred as p1 x p2."""
     if len(tr) < 10:
         return None
     R = tr.R.values
@@ -618,43 +670,82 @@ def sequential_challenge(tr, cfg, phase="phase1"):
     entry_t = pd.to_datetime(tr.entry).values
     bal0 = cfg["balance"]
     unit = bal0 * cfg["risk_pct"] / 100.0
-    tgt = cfg[phase] / 100.0
     dd = cfg["daily_loss"] / 100.0
     floor = bal0 * (1 - cfg["max_loss"] / 100.0)
-    out = {"PASS": 0, "FAIL_MAXLOSS": 0, "FAIL_DAILY": 0, "TIMEOUT": 0}
-    cal_days, n_trades = [], []
-    for start in range(len(R)):
-        bal = bal0
-        day = None
-        day_start = bal
-        res, end_i = "TIMEOUT", len(R) - 1
-        for k in range(start, len(R)):
-            if exit_days[k] != day:
-                day = exit_days[k]
-                day_start = bal
-            bal += R[k] * unit
-            if bal <= day_start * (1 - dd):
-                res, end_i = "FAIL_DAILY", k; break
-            if bal <= floor:
-                res, end_i = "FAIL_MAXLOSS", k; break
-            if bal >= bal0 * (1 + tgt):
-                res, end_i = "PASS", k; break
-        out[res] += 1
-        if res == "PASS":
-            cal_days.append(int((entry_t[end_i] - entry_t[start])
-                                / np.timedelta64(1, "D")))
-            n_trades.append(k - start + 1)
-    tot = max(sum(out.values()), 1)
-    return dict(
-        pass_pct=100 * out["PASS"] / tot,
-        fail_maxloss=100 * out["FAIL_MAXLOSS"] / tot,
-        fail_daily=100 * out["FAIL_DAILY"] / tot,
-        timeout=100 * out["TIMEOUT"] / tot,
-        starts=tot,
-        med_cal_days=int(np.median(cal_days)) if cal_days else None,
-        worst_cal_days=int(np.max(cal_days)) if cal_days else None,
-        med_trades=int(np.median(n_trades)) if n_trades else None,
-    )
+    min_days = int(cfg.get("min_days", 0) or 0)
+    bd = float(cfg.get("best_day_pct", 0) or 0)
+    t1 = cfg["phase1"] / 100.0
+    t2 = cfg["phase2"] / 100.0
+
+    def days_between(a, b):
+        return int((entry_t[b] - entry_t[a]) / np.timedelta64(1, "D"))
+
+    p1 = {"PASS": 0, "FAIL_MAXLOSS": 0, "FAIL_DAILY": 0, "TIMEOUT": 0}
+    p2 = {"PASS": 0, "FAIL_MAXLOSS": 0, "FAIL_DAILY": 0, "TIMEOUT": 0}
+    p1_days, p1_trades, p1_tdays = [], [], []
+    p2_days, p2_trades = [], []
+    full_days, full_trades = [], []
+    n_full_pass = 0
+    n_starts = len(R)
+
+    for start in range(n_starts):
+        o1, e1, k1, td1 = _run_phase(R, exit_days, start, bal0, unit, t1, dd,
+                                     floor, min_days, bd)
+        p1[o1] += 1
+        if o1 != "PASS":
+            continue
+        p1_days.append(days_between(start, e1))
+        p1_trades.append(k1)
+        p1_tdays.append(td1)
+        if e1 + 1 >= n_starts:          # Phase 1 passed but no data left for Phase 2
+            p2["TIMEOUT"] += 1
+            continue
+        o2, e2, k2, _ = _run_phase(R, exit_days, e1 + 1, bal0, unit, t2, dd,
+                                   floor, min_days, bd)
+        p2[o2] += 1
+        if o2 == "PASS":
+            n_full_pass += 1
+            p2_days.append(days_between(e1 + 1, e2))
+            p2_trades.append(k2)
+            full_days.append(days_between(start, e2))
+            full_trades.append(k1 + k2)
+
+    n_p1_pass = p1["PASS"]
+    n_p2_eval = sum(p2.values())
+
+    def pack(d, tot):
+        return {k: (100.0 * v / tot if tot else None) for k, v in d.items()}
+
+    return {
+        "starts": n_starts,
+        "min_days": min_days,
+        "best_day_pct": bd,
+        # ---- Phase 1: unconditional, every start ----
+        "p1": dict(pack(p1, n_starts),
+                   n_pass=n_p1_pass,
+                   med_trades=_pctl(p1_trades, 50),
+                   med_days=_pctl(p1_days, 50), d25=_pctl(p1_days, 25),
+                   d75=_pctl(p1_days, 75), d90=_pctl(p1_days, 90),
+                   worst_days=_pctl(p1_days, 100),
+                   med_trading_days=_pctl(p1_tdays, 50)),
+        # ---- Phase 2: CONDITIONAL on Phase 1 having passed ----
+        "p2": dict(pack(p2, n_p2_eval),
+                   evaluated=n_p2_eval, n_pass=p2["PASS"],
+                   med_trades=_pctl(p2_trades, 50),
+                   med_days=_pctl(p2_days, 50), d25=_pctl(p2_days, 25),
+                   d75=_pctl(p2_days, 75), d90=_pctl(p2_days, 90),
+                   worst_days=_pctl(p2_days, 100)),
+        # ---- FULL 2-step: measured directly, not p1 x p2 ----
+        "full": {
+            "pass_pct": 100.0 * n_full_pass / n_starts,
+            "fail_pct": 100.0 * (n_starts - n_full_pass) / n_starts,
+            "p1_pass_p2_fail_pct": 100.0 * (n_p1_pass - n_full_pass) / n_starts,
+            "p1_fail_pct": 100.0 * (n_starts - n_p1_pass) / n_starts,
+            "med_days": _pctl(full_days, 50), "d75": _pctl(full_days, 75),
+            "d90": _pctl(full_days, 90), "worst_days": _pctl(full_days, 100),
+            "med_trades": _pctl(full_trades, 50),
+        },
+    }
 
 
 def monte_carlo(tr, cfg, nsims=1000, phase="phase1", seed=7):
@@ -731,6 +822,205 @@ def monte_carlo(tr, cfg, nsims=1000, phase="phase1", seed=7):
 
 
 # ----------------------------------------------------------------------------
+def deterministic_path(tr, cfg):
+    """ONE HISTORICAL PATH. Runs the actual trade sequence from the first trade
+    through Phase 1 and, if it completes, Phase 2. This is a single realisation
+    of history - it is NOT a probability and must never be reported as one."""
+    if len(tr) < 5:
+        return None
+    R = tr.R.values
+    exit_days = pd.to_datetime(tr.exit).dt.date.values
+    entry_t = pd.to_datetime(tr.entry).values
+    bal0 = cfg["balance"]
+    unit = bal0 * cfg["risk_pct"] / 100.0
+    dd = cfg["daily_loss"] / 100.0
+    floor = bal0 * (1 - cfg["max_loss"] / 100.0)
+    min_days = int(cfg.get("min_days", 0) or 0)
+    bd = float(cfg.get("best_day_pct", 0) or 0)
+
+    o1, e1, k1, td1 = _run_phase(R, exit_days, 0, bal0, unit,
+                                 cfg["phase1"] / 100.0, dd, floor, min_days, bd)
+    days1 = int((entry_t[e1] - entry_t[0]) / np.timedelta64(1, "D"))
+    out = {"p1_outcome": o1, "p1_trades": k1, "p1_days": days1,
+           "p1_trading_days": td1, "p2_outcome": "NOT REACHED",
+           "p2_trades": None, "p2_days": None,
+           "total_trades": k1, "total_days": days1, "full": "FAILED"}
+    if o1 != "PASS":
+        out["full"] = "FAILED"
+    elif e1 + 1 >= len(R):
+        out["p2_outcome"] = "NOT REACHED"; out["full"] = "INCOMPLETE"
+    else:
+        o2, e2, k2, _ = _run_phase(R, exit_days, e1 + 1, bal0, unit,
+                                   cfg["phase2"] / 100.0, dd, floor, min_days, bd)
+        days2 = int((entry_t[e2] - entry_t[e1 + 1]) / np.timedelta64(1, "D"))
+        out.update(p2_outcome=o2, p2_trades=k2, p2_days=days2,
+                   total_trades=k1 + k2,
+                   total_days=int((entry_t[e2] - entry_t[0]) / np.timedelta64(1, "D")),
+                   full=("PASSED" if o2 == "PASS"
+                         else ("INCOMPLETE" if o2 == "TIMEOUT" else "FAILED")))
+    # equity extremes over the whole realised path (research view)
+    eq = bal0 + np.cumsum(R) * unit
+    out["worst_balance"] = float(min(eq.min(), bal0))
+    out["final_balance"] = float(eq[-1])
+    peak = np.maximum.accumulate(np.concatenate([[bal0], eq]))
+    out["max_dd_pct"] = float((((np.concatenate([[bal0], eq]) - peak) / peak).min()) * -100)
+    return out
+
+
+def monte_carlo_joint(tr, cfg, nsims=1000, seed=11):
+    """SHUFFLED bootstrap of BOTH phases jointly.
+
+    Trade ORDER IS RANDOMISED - this deliberately destroys real losing clusters,
+    so it answers "if my trades arrived in a random order, how often would I
+    pass?" It is NOT the historical answer; compare against sequential_challenge.
+
+    Phase 2 is simulated by continuing to draw trades after Phase 1 completes,
+    with the balance reset to the starting balance. The both-phase probability
+    is therefore a TRUE joint probability, never p1 x p2."""
+    if len(tr) < 10:
+        return None
+    R = tr.R.values
+    bal0 = cfg["balance"]
+    unit = bal0 * cfg["risk_pct"] / 100.0
+    dd = cfg["daily_loss"] / 100.0
+    floor = bal0 * (1 - cfg["max_loss"] / 100.0)
+    min_days = int(cfg.get("min_days", 0) or 0)
+    t1 = cfg["phase1"] / 100.0
+    t2 = cfg["phase2"] / 100.0
+    rng = np.random.default_rng(seed)
+    horizon = 1200
+
+    def phase(seq, pos, tgt, day_len):
+        bal = bal0
+        day_start = bal
+        used = 0
+        peak = bal
+        mdd = 0.0
+        strk = mstrk = 0
+        k = pos
+        cnt = 0
+        while k < len(seq):
+            if cnt % day_len == 0:
+                day_start = bal
+                used += 1
+            r = seq[k]
+            bal += r * unit
+            peak = max(peak, bal)
+            mdd = max(mdd, (peak - bal) / peak)
+            strk = strk + 1 if r < 0 else 0
+            mstrk = max(mstrk, strk)
+            k += 1; cnt += 1
+            if bal <= day_start * (1 - dd):
+                return "FAIL_DAILY", k, cnt, mdd, mstrk
+            if bal <= floor:
+                return "FAIL_MAXLOSS", k, cnt, mdd, mstrk
+            if bal >= bal0 * (1 + tgt) and used >= min_days:
+                return "PASS", k, cnt, mdd, mstrk
+        return "TIMEOUT", k, cnt, mdd, mstrk
+
+    o1 = {"PASS": 0, "FAIL_MAXLOSS": 0, "FAIL_DAILY": 0, "TIMEOUT": 0}
+    o2 = dict(o1)
+    both = 0
+    n1, n2, ntot, dds, strks = [], [], [], [], []
+    for _ in range(nsims):
+        seq = R[rng.integers(0, len(R), horizon)]
+        dl = int(rng.integers(2, 6))
+        r1, pos, c1, dd1, s1 = phase(seq, 0, t1, dl)
+        o1[r1] += 1
+        dds.append(dd1 * 100); strks.append(s1)
+        if r1 != "PASS":
+            continue
+        n1.append(c1)
+        r2, _, c2, dd2, s2 = phase(seq, pos, t2, dl)
+        o2[r2] += 1
+        dds[-1] = max(dds[-1], dd2 * 100); strks[-1] = max(strks[-1], s2)
+        if r2 == "PASS":
+            both += 1; n2.append(c2); ntot.append(c1 + c2)
+    tot = max(nsims, 1)
+    n2e = max(sum(o2.values()), 1)
+    return {
+        "nsims": nsims,
+        "p1": {k: 100.0 * v / tot for k, v in o1.items()},
+        "p2_cond": {k: 100.0 * v / n2e for k, v in o2.items()},
+        "p2_evaluated": sum(o2.values()),
+        "both_pct": 100.0 * both / tot,
+        "med_trades_p1": _pctl(n1, 50), "med_trades_p2": _pctl(n2, 50),
+        "med_trades_total": _pctl(ntot, 50),
+        "typ_dd": float(np.median(dds)) if dds else None,
+        "worst_dd": float(np.percentile(dds, 95)) if dds else None,
+        "typ_streak": int(np.median(strks)) if strks else None,
+        "worst_streak": int(np.percentile(strks, 95)) if strks else None,
+    }
+
+
+def winner_concentration(tr):
+    """Does the result rest on a handful of outlier trades?"""
+    R = np.sort(tr.R.values)[::-1]
+    tot = R.sum()
+    out = {"expR": float(R.mean()), "levels": []}
+    for k in (1, 3, 5, 10):
+        if len(R) <= k + 5:
+            continue
+        out["levels"].append({
+            "k": k,
+            "expR_without": float(R[k:].mean()),
+            "pct_of_totR": (float(100.0 * R[:k].sum() / tot) if tot else None),
+        })
+    return out
+
+
+def yearly_breakdown(tr):
+    """Per calendar year, to show whether the edge is one regime."""
+    t = tr.copy()
+    t["yr"] = pd.to_datetime(t.entry).dt.year
+    rows = []
+    for y, g in t.groupby("yr"):
+        R = g.R.values
+        w = R[R > 0].sum(); l = abs(R[R <= 0].sum())
+        rows.append({"year": int(y), "n": int(len(R)), "expR": float(R.mean()),
+                     "pf": float(min(w / l, 9.99)) if l > 0 else 9.99,
+                     "win": float(100 * (R > 0).mean())})
+    return rows
+
+
+def risk_comparison(tr, cfg, levels=(0.35, 0.40, 0.50, 0.60, 0.65, 0.70, 0.75, 0.85)):
+    """Same trades, same strategy - only the account risk setting changes.
+    Makes the safety/speed trade-off directly visible."""
+    rows = []
+    for rp in levels:
+        c = dict(cfg); c["risk_pct"] = rp
+        sq = sequential_challenge(tr, c)
+        mj = monte_carlo_joint(tr, c, nsims=400)
+        if not sq or not mj:
+            continue
+        rows.append({
+            "risk": rp,
+            "seq_p1": sq["p1"]["PASS"], "seq_p2_cond": sq["p2"]["PASS"],
+            "seq_full": sq["full"]["pass_pct"],
+            "mc_both": mj["both_pct"],
+            "maxloss": sq["p1"]["FAIL_MAXLOSS"], "daily": sq["p1"]["FAIL_DAILY"],
+            "med_days": sq["full"]["med_days"] or sq["p1"]["med_days"],
+            "typ_dd": mj["typ_dd"], "worst_dd": mj["worst_dd"],
+        })
+    return rows
+
+
+def best_day_report(tr, cfg):
+    """Measure the Best Day ratio on the real trade sequence."""
+    thr = float(cfg.get("best_day_pct", 0) or 0)
+    unit = cfg["balance"] * cfg["risk_pct"] / 100.0
+    t = tr.copy()
+    t["d"] = pd.to_datetime(t.exit).dt.date
+    daily = (t.groupby("d").R.sum() * unit)
+    pos = daily[daily > 0]
+    total_pos = float(pos.sum())
+    best = float(pos.max()) if len(pos) else 0.0
+    pct = (100.0 * best / total_pos) if total_pos > 0 else None
+    return {"enabled": thr > 0, "threshold": thr, "best_day": best,
+            "total_positive": total_pos, "best_day_pct": pct,
+            "compliant": (None if thr <= 0 or pct is None else pct <= thr)}
+
+
 def lookahead_check(Strat, data, base_tf, build_log=None, d_full=None):
     """
     Truncate the data at several points and recompute. A legitimate strategy's
@@ -1050,8 +1340,10 @@ def run_test(code, cfg, mode="fast", progress=None):
     mc = monte_carlo(tr, cfg, nsims=nsims, phase="phase1")
     step("Prop Monte Carlo (phase 2)", 80)
     mc2 = monte_carlo(tr, cfg, nsims=nsims, phase="phase2")
-    step("Sequential (real-order) challenge", 83)
-    seq = sequential_challenge(tr, cfg, phase="phase1")
+    step("Sequential (real-order) 2-step challenge", 83)
+    seq = sequential_challenge(tr, cfg)
+    step("Joint shuffled Monte Carlo (both phases)", 84)
+    mcj = monte_carlo_joint(tr, cfg, nsims=nsims)
 
     step("Cost stress", 86)
     cost_mults = (1.0, 1.5, 2.0, 3.0) if deep else (1.0, 2.0, 3.0)
@@ -1131,6 +1423,8 @@ def run_test(code, cfg, mode="fast", progress=None):
     # Runs the ACTUAL trade sequence under the firm's rules; stops at target or
     # bust. Same fixed-fractional model as the Monte Carlo -> item 9 satisfied.
     acct = prop_sim_days(tr, cfg, phase="phase1")
+    # ONE HISTORICAL PATH, both phases, deterministic. Never a probability.
+    det = deterministic_path(tr, cfg)
 
     # === PROP CHALLENGE SIMULATION BLOCK ==================================
     # Everything the user asked to see, all derived from the CONFIGURED account
@@ -1171,14 +1465,26 @@ def run_test(code, cfg, mode="fast", progress=None):
         "nsims": mc["nsims"] if mc else None,
         "trades_per_year": round(md_all["n"] / (cal_span / 365.25), 1),
         "active_days": active_days,
-        # time-ordered reality check (see sequential_challenge)
-        "seq_pass": round(seq["pass_pct"]) if seq else None,
-        "seq_maxloss": round(seq["fail_maxloss"]) if seq else None,
-        "seq_timeout": round(seq["timeout"]) if seq else None,
+        "avg_days_between": round(cal_span / max(md_all["n"], 1), 1),
+        # ---- kept for back-compat with older saved reports ----
+        "seq_pass": round(seq["p1"]["PASS"]) if seq else None,
+        "seq_maxloss": round(seq["p1"]["FAIL_MAXLOSS"]) if seq else None,
+        "seq_timeout": round(seq["p1"]["TIMEOUT"]) if seq else None,
         "seq_starts": seq["starts"] if seq else None,
-        "seq_med_days": seq["med_cal_days"] if seq else None,
-        "seq_worst_days": seq["worst_cal_days"] if seq else None,
-        "seq_med_trades": seq["med_trades"] if seq else None,
+        "seq_med_days": seq["p1"]["med_days"] if seq else None,
+        "seq_worst_days": seq["p1"]["worst_days"] if seq else None,
+        "seq_med_trades": seq["p1"]["med_trades"] if seq else None,
+    }
+    # ---- exact account arithmetic (a conversion, NOT a trade estimate) ----
+    _r1 = bal0 * cfg["risk_pct"] / 100.0
+    prop["math"] = {
+        "one_R": round(_r1, 2),
+        "p1_target_usd": round(bal0 * cfg["phase1"] / 100.0, 2),
+        "p2_target_usd": round(bal0 * cfg["phase2"] / 100.0, 2),
+        "daily_usd": round(bal0 * cfg["daily_loss"] / 100.0, 2),
+        "maxloss_usd": round(bal0 * cfg["max_loss"] / 100.0, 2),
+        "p1_R_required": round(cfg["phase1"] / cfg["risk_pct"], 1) if cfg["risk_pct"] else None,
+        "p2_R_required": round(cfg["phase2"] / cfg["risk_pct"], 1) if cfg["risk_pct"] else None,
     }
     edge = {
         "dev": round(md_dev["expR"], 4),
@@ -1201,6 +1507,55 @@ def run_test(code, cfg, mode="fast", progress=None):
         "hold_quality": ("clear edge" if edge_flags["hold_ok"]
                          else "NO CLEAR EDGE / EXECUTION-SENSITIVE"),
     }
+
+    step("Risk comparison + diagnostics", 94)
+    # Same trades, same strategy - only cfg["risk_pct"] varies per row.
+    risk_rows = risk_comparison(tr, cfg) if deep else []
+
+    # ---- explicit, rule-based trust labels (no vague wording) ----
+    _ht = md_hold["t"]
+    _he = md_hold["expR"]
+    _hn = md_hold["n"]
+    if _hn < 15:
+        hold_label = "HOLDOUT TOO SMALL"
+    elif _he <= EXEC_UNCERTAINTY_R:
+        hold_label = "EXECUTION-SENSITIVE"
+    elif _ht < 2.0:
+        hold_label = "NO CLEAR STATISTICAL CONFIRMATION"
+    else:
+        hold_label = "CLEAR EDGE"
+    seq_full = seq["full"]["pass_pct"] if seq else None
+    mc_both = mcj["both_pct"] if mcj else None
+    trust = {
+        "hold_label": hold_label,
+        "small_holdout": bool(_hn < 100),
+        "hold_n": _hn, "hold_t": round(_ht, 2), "hold_expR": round(_he, 4),
+        "exec_threshold": EXEC_UNCERTAINTY_R,
+        "seq_vs_mc_gap": (round(mc_both - seq_full, 1)
+                          if (seq_full is not None and mc_both is not None) else None),
+        "higher_trust": ["real-order sequential result", "holdout edge",
+                         "benchmark edge", "inversion test", "cost stress"],
+        "lower_trust": ["shuffled probability on its own",
+                        "single deterministic historical path",
+                        "holdout samples under 100 trades",
+                        "heavily optimised variants"],
+    }
+    # risk posture from the CONFIGURED risk vs the observed worst streak
+    _ws = mcj["worst_streak"] if mcj else None
+    _rp = cfg["risk_pct"]
+    _exposure = (_ws * _rp) if _ws else None
+    if _exposure is None:
+        posture = "UNKNOWN"
+    elif _exposure < cfg["max_loss"] * 0.45:
+        posture = "CONSERVATIVE"
+    elif _exposure < cfg["max_loss"] * 0.65:
+        posture = "MODERATE"
+    elif _exposure < cfg["max_loss"] * 0.85:
+        posture = "AGGRESSIVE"
+    else:
+        posture = "VERY AGGRESSIVE"
+    trust["posture"] = posture
+    trust["streak_exposure_pct"] = round(_exposure, 2) if _exposure else None
 
     step("Finalizing", 97)
     timing["total"] = round(time.perf_counter() - t0, 3)
@@ -1234,6 +1589,15 @@ def run_test(code, cfg, mode="fast", progress=None):
         "risk_daily": round(mc["fail_daily"]) if mc else None,
         "prop": prop,
         "edge": edge,
+        # ---- structured, explicitly-labelled report blocks ----
+        "sequential": seq,          # REAL historical order, full 2-step
+        "mc_joint": mcj,            # SHUFFLED order, both phases jointly
+        "deterministic": det,       # ONE historical path (not a probability)
+        "concentration": winner_concentration(tr),
+        "yearly": yearly_breakdown(tr),
+        "best_day": best_day_report(tr, cfg),
+        "risk_table": risk_rows,
+        "trust": trust,
         "benchmarks": bench,
         "inversion": {"expR": inv_expR, "collapses": bool(edge_flags["inv_ok"])},
         "edge_ok": bool(edge_flags["edge_ok"]),

@@ -126,6 +126,7 @@ canvas{width:100%;height:180px;background:#0b0e12;border-radius:8px;border:1px s
     <div><label>Max total loss (%)</label><input id="max_loss"></div>
     <div><label>Risk per trade (%)</label><input id="risk_pct"></div>
     <div><label>Min trading days (optional)</label><input id="min_days"></div>
+    <div><label>Best Day Rule cap (%, 0=off)</label><input id="best_day_pct"></div>
   </div>
   <button class="sm" style="margin:12px 0 0 0" onclick="saveCfg()">SAVE ACCOUNT</button>
 </div>
@@ -156,7 +157,7 @@ async function boot(){
   CFG=r.cfg; document.getElementById('code').value=r.code;
   document.getElementById('dir').value=CFG.dataset_dir;
   document.getElementById('sym').value=CFG.symbol;
-  ['balance','phase1','phase2','daily_loss','max_loss','risk_pct','min_days']
+  ['balance','phase1','phase2','daily_loss','max_loss','risk_pct','min_days','best_day_pct']
     .forEach(k=>document.getElementById(k).value=CFG[k]);
   const d=r.ds; let s='';
   if(!d.ok){ s='<span style="color:#ff9b9b">! '+d.msg+'</span>'; }
@@ -168,7 +169,7 @@ async function boot(){
 }
 async function saveCfg(){
   const c={dataset_dir:document.getElementById('dir').value,symbol:document.getElementById('sym').value};
-  ['balance','phase1','phase2','daily_loss','max_loss','risk_pct','min_days']
+  ['balance','phase1','phase2','daily_loss','max_loss','risk_pct','min_days','best_day_pct']
     .forEach(k=>c[k]=parseFloat(document.getElementById(k).value)||0);
   await fetch('/api/config',{method:'POST',body:JSON.stringify(c)});
   location.reload();
@@ -240,87 +241,251 @@ function render(r){
    +H('hs','Primarily the probability of passing YOUR configured challenge, plus robustness: holdout edge by magnitude, survival at 3x cost, and outperformance vs a drift benchmark. Raw trade count and a fixed RR earn nothing; failing the edge gates caps the score and labels it NO CLEAR EDGE.')
    +'</div><div class="s">'+r.score+'<span style="font-size:22px;color:#5b6675">/100</span></div></div>';
 
-  // ============ PROP CHALLENGE SIMULATION (the headline product) ============
-  if(r.prop){ const P=r.prop;
+  // ================= FINAL VERDICT =================
+  if(r.sequential && r.trust){
+    const F=r.sequential.full, T=r.trust, E2=r.edge||{};
     h+='<div class="card" style="border-color:#2f4a86">'
-     +'<div style="font-size:14px;color:#8ab4f8;font-weight:700;letter-spacing:.4px;margin-bottom:3px">PROP CHALLENGE SIMULATION</div>'
-     +'<div style="font-size:11px;color:#5b6675;margin-bottom:12px">'+dash(P.nsims)+' Monte-Carlo challenges on YOUR configured account &middot; every number below recomputes when you change ACCOUNT SETTINGS</div>'
-     +'<div class="grid" style="margin-bottom:12px">'
-     +'<div class="m"><div class="lab">Starting balance</div><div class="val" style="font-size:18px">$'+Number(P.start).toLocaleString()+'</div></div>'
-     +'<div class="m"><div class="lab">Risk / trade</div><div class="val" style="font-size:18px">'+P.risk_pct+'%</div></div>'
-     +'<div class="m"><div class="lab">Phase 1 / 2 target</div><div class="val" style="font-size:18px">'+P.phase1_tgt+'% / '+P.phase2_tgt+'%</div></div>'
-     +'<div class="m"><div class="lab">Daily / Max loss</div><div class="val" style="font-size:18px">'+P.daily_loss+'% / '+P.max_loss+'%</div></div>'
-     +'</div>'
      +'<div class="grid">'
-     +'<div class="m"><div class="lab">Phase 1 pass'+H('hp1','Chance of reaching the Phase-1 target before a max-loss or daily-loss breach, over the Monte-Carlo challenges.')+'</div><div class="val">'+fmtpct(P.p1_pass)+'</div></div>'
-     +'<div class="m"><div class="lab">Phase 2 pass</div><div class="val">'+fmtpct(P.p2_pass)+'</div></div>'
-     +'<div class="m"><div class="lab">Pass BOTH phases</div><div class="val" style="color:#8ab4f8">'+fmtpct(P.both_pass)+'</div></div>'
-     +'<div class="m"><div class="lab">Hit max loss first</div><div class="val" style="color:#ff9b9b">'+fmtpct(P.fail_maxloss)+'</div></div>'
-     +'<div class="m"><div class="lab">Daily-loss breach</div><div class="val" style="color:#ff9b9b">'+fmtpct(P.fail_daily)+'</div></div>'
+     +'<div class="m"><div class="lab">Strategy quality</div><div class="val" style="font-size:17px">'+T.hold_label+'</div></div>'
+     +'<div class="m"><div class="lab">Prop risk posture</div><div class="val" style="font-size:17px">'+T.posture+'</div></div>'
+     +'<div class="m"><div class="lab">FULL 2-STEP sequential pass</div><div class="val" style="color:#8ab4f8">'+F.pass_pct.toFixed(1)+'%</div></div>'
+     +'<div class="m"><div class="lab">Median total calendar days</div><div class="val">'+dash(F.med_days)+'</div></div>'
      +'</div>'
-     +'<div style="margin-top:14px"><table>'
-     +'<tr><th>Phase 1</th><th>Phase 2</th><th>Risk profile</th></tr>'
-     +'<tr><td>Typical trades to pass: <b>'+dash(P.p1_med_trades)+'</b></td>'
-        +'<td>Typical trades to pass: <b>'+dash(P.p2_med_trades)+'</b></td>'
-        +'<td>Typical drawdown: <b>'+dash(P.typ_dd)+'%</b></td></tr>'
-     +'<tr><td>Worst-case trades: <b>'+dash(P.p1_worst_trades)+'</b></td>'
-        +'<td></td>'
-        +'<td>Worst drawdown: <b>'+dash(P.worst_dd)+'%</b></td></tr>'
-     +'<tr><td>Typical trading days: <b>'+dash(P.p1_typ_days)+'</b></td>'
-        +'<td></td>'
-        +'<td>Typical losing streak: <b>'+dash(P.typ_streak)+'</b></td></tr>'
-     +'<tr><td>Worst trading days: <b>'+dash(P.p1_worst_days)+'</b></td>'
-        +'<td></td>'
-        +'<td>Worst losing streak: <b>'+dash(P.worst_streak)+'</b></td></tr>'
-     +'</table></div>'
-     +'<div style="font-size:11px;color:#5b6675;margin-top:6px">Trade frequency: '
-       +dash(P.trades_per_year)+' trades/year &middot; days above are CALENDAR days</div>'
-     +(P.seq_pass===null||P.seq_pass===undefined?'':
-        '<div style="margin-top:14px;padding-top:12px;border-top:1px solid #242a33">'
-        +'<div style="font-size:12px;color:#93a0b0;margin-bottom:8px">REALITY CHECK &mdash; SEQUENTIAL (real trade order)'
-        +H('hsq','The Monte Carlo above shuffles your trades, which breaks up real losing clusters. This instead starts a challenge at every historical trade and runs forward in the ACTUAL order. If it is much worse than the shuffled number, your losses arrive in runs and the shuffled odds are too optimistic.')+'</div>'
-        +'<div class="grid">'
-        +'<div class="m"><div class="lab">Phase 1 pass (real order)</div><div class="val" style="color:'
-          +((P.seq_pass>=P.p1_pass-10)?'#7ee2a0':'#ff9b9b')+'">'+fmtpct(P.seq_pass)+'</div></div>'
-        +'<div class="m"><div class="lab">Hit max loss</div><div class="val">'+fmtpct(P.seq_maxloss)+'</div></div>'
-        +'<div class="m"><div class="lab">Never reached target</div><div class="val">'+fmtpct(P.seq_timeout)+'</div></div>'
-        +'<div class="m"><div class="lab">Median time to pass</div><div class="val" style="font-size:18px">'
-          +dash(P.seq_med_days)+' days</div></div>'
-        +'</div>'
-        +((P.seq_pass < P.p1_pass - 10)?'<div class="warn" style="margin:10px 0 0">Shuffled odds ('
-           +fmtpct(P.p1_pass)+') are much better than real-order odds ('+fmtpct(P.seq_pass)
-           +'). Your losing trades arrive in clusters, so trust the sequential number.</div>':'')
-        +'</div>')
+     +'<div style="margin-top:12px;font-size:13px;color:#c3cede;line-height:1.6">'
+     +'At '+r.prop.risk_pct+'% risk on $'+Number(r.prop.start).toLocaleString()+', this strategy completed BOTH phases in <b>'
+     +F.pass_pct.toFixed(1)+'%</b> of real-order historical simulations (n='+r.sequential.starts+' start points). '
+     +'Median completion was <b>'+dash(F.med_days)+' calendar days</b> ('+dash(F.med_trades)+' trades); the 90th percentile was '+dash(F.d90)+' days. '
+     +'Holdout expectancy was <b>'+T.hold_expR+'R</b> across '+T.hold_n+' trades (t '+T.hold_t+'), and the inverted strategy returned '+dash(E2.inverted)+'R. '
+     +'These are measured historical figures, not predictions.</div></div>';
+  }
+
+  // ================= DO NOT MISREAD =================
+  h+='<div class="warn"><b>IMPORTANT &mdash; how to read this report</b>'
+   +'<ul style="margin:8px 0 0 18px;padding:0;line-height:1.7">'
+   +'<li>A backtest is not a guarantee of future performance.</li>'
+   +'<li>Shuffled Monte Carlo is not the same as historical-order sequential testing.</li>'
+   +'<li>Phase&nbsp;1 pass probability is <b>not</b> full 2-step pass probability.</li>'
+   +'<li>One historical path is not a probability estimate.</li>'
+   +'<li>Positive holdout expectancy alone is not sufficient evidence of a real edge.</li>'
+   +'<li>Lower risk improves account survival but increases time-to-target.</li>'
+   +'<li>Higher risk reduces expected time-to-target but increases drawdown/path risk.</li>'
+   +'</ul></div>';
+
+  // ================= PROP CHALLENGE RESULTS =================
+  if(r.prop){ const P=r.prop, M=P.math||{}, BD=r.best_day||{};
+    h+='<div class="card"><div style="font-size:14px;color:#8ab4f8;font-weight:700;margin-bottom:3px">PROP CHALLENGE RESULTS</div>'
+     +'<div style="font-size:11px;color:#5b6675;margin-bottom:12px">Every figure below is driven by ACCOUNT SETTINGS and recomputes when you change them.</div>'
+     +'<div class="grid">'
+     +'<div class="m"><div class="lab">Account</div><div class="val" style="font-size:17px">$'+Number(P.start).toLocaleString()+'</div></div>'
+     +'<div class="m"><div class="lab">Risk per trade</div><div class="val" style="font-size:17px">'+P.risk_pct+'%</div></div>'
+     +'<div class="m"><div class="lab">Phase 1 target</div><div class="val" style="font-size:17px">'+P.phase1_tgt+'%</div></div>'
+     +'<div class="m"><div class="lab">Phase 2 target</div><div class="val" style="font-size:17px">'+P.phase2_tgt+'%</div></div>'
+     +'<div class="m"><div class="lab">Daily loss</div><div class="val" style="font-size:17px">'+P.daily_loss+'%</div></div>'
+     +'<div class="m"><div class="lab">Maximum loss</div><div class="val" style="font-size:17px">'+P.max_loss+'%</div></div>'
+     +'<div class="m"><div class="lab">Minimum trading days</div><div class="val" style="font-size:17px">'+dash(r.sequential?r.sequential.min_days:null)+'</div></div>'
+     +'<div class="m"><div class="lab">Best Day Rule</div><div class="val" style="font-size:17px">'
+       +(BD.enabled?(BD.threshold+'% cap'):'off')+'</div></div>'
+     +'</div>'
+     +'<div style="margin-top:12px"><table>'
+     +'<tr><th>Exact account math</th><th>Value</th></tr>'
+     +'<tr><td>1R</td><td>$'+dash(M.one_R)+'</td></tr>'
+     +'<tr><td>Phase 1 target</td><td>$'+dash(M.p1_target_usd)+'</td></tr>'
+     +'<tr><td>Phase 2 target</td><td>$'+dash(M.p2_target_usd)+'</td></tr>'
+     +'<tr><td>Daily loss limit</td><td>-$'+dash(M.daily_usd)+'</td></tr>'
+     +'<tr><td>Maximum loss</td><td>-$'+dash(M.maxloss_usd)+'</td></tr>'
+     +'<tr><td>R required for Phase 1 (arithmetic)</td><td>'+dash(M.p1_R_required)+'R</td></tr>'
+     +'<tr><td>R required for Phase 2 (arithmetic)</td><td>'+dash(M.p2_R_required)+'R</td></tr>'
+     +'</table><div style="font-size:11px;color:#5b6675;margin-top:6px">'
+     +'R required is a simple target/risk conversion. It is NOT an estimate of how many trades are needed &mdash; '
+     +'losing trades mean the actual trade count is far higher.</div></div></div>';
+  }
+
+  // ================= REALITY CHECK =================
+  if(r.sequential && r.mc_joint){
+    const gap = r.mc_joint.both_pct - r.sequential.full.pass_pct;
+    const bad = gap > 5;
+    h+='<div class="'+(bad?'warn':'card')+'"'+(bad?'':' style="border-color:#2f4a86"')+'>'
+     +'<div style="font-size:13px;font-weight:700;margin-bottom:6px">REALITY CHECK &mdash; SHUFFLED vs REAL ORDER</div>'
+     +'<div class="row"><span>Shuffled Monte Carlo, full 2-step pass</span><b>'+r.mc_joint.both_pct.toFixed(1)+'%</b></div>'
+     +'<div class="row"><span>Sequential real-order, full 2-step pass</span><b>'+r.sequential.full.pass_pct.toFixed(1)+'%</b></div>'
+     +'<div class="row"><span>Difference</span><b style="color:'+(gap>0?'#ff9b9b':'#7ee2a0')+'">'
+       +(gap>0?'+':'')+gap.toFixed(1)+' percentage points</b></div>'
+     +'<div style="margin-top:8px;font-size:12px;line-height:1.6">'
+     +(bad
+       ? 'Shuffled results are <b>optimistic here</b>. Randomising trade order breaks up real losing clusters. The sequential result preserves historical clustering and should receive more weight.'
+       : 'Shuffled and real-order results are close, so trade-order clustering is not distorting the picture. The sequential number is still the one to weight.')
+     +'</div></div>';
+  }
+
+  // ================= A. SHUFFLED MONTE CARLO =================
+  if(r.mc_joint){ const J=r.mc_joint;
+    h+='<div class="card"><div style="font-size:13px;color:#8ab4f8;font-weight:700">A. SHUFFLED MONTE CARLO &mdash; TRADE ORDER RANDOMIZED</div>'
+     +'<div style="font-size:11px;color:#5b6675;margin:4px 0 10px">'+J.nsims+' simulations. Trade order is randomized, which deliberately destroys real losing clusters. '
+     +'Both phases are simulated jointly, so the both-phase figure is a true <b>Joint Monte Carlo Pass Probability</b> &mdash; not Phase1 &times; Phase2.</div>'
+     +'<table><tr><th></th><th>Pass</th><th>Max loss</th><th>Daily loss</th><th>Never reached</th></tr>'
+     +'<tr><td>Phase 1</td><td>'+J.p1.PASS.toFixed(1)+'%</td><td>'+J.p1.FAIL_MAXLOSS.toFixed(1)+'%</td><td>'+J.p1.FAIL_DAILY.toFixed(1)+'%</td><td>'+J.p1.TIMEOUT.toFixed(1)+'%</td></tr>'
+     +'<tr><td>Phase 2 <span style="color:#5b6675">(given P1 passed)</span></td><td>'+J.p2_cond.PASS.toFixed(1)+'%</td><td>'+J.p2_cond.FAIL_MAXLOSS.toFixed(1)+'%</td><td>'+J.p2_cond.FAIL_DAILY.toFixed(1)+'%</td><td>'+J.p2_cond.TIMEOUT.toFixed(1)+'%</td></tr>'
+     +'</table>'
+     +'<div class="row" style="margin-top:8px"><span><b>Joint Monte Carlo pass probability (both phases)</b></span><b style="color:#8ab4f8">'+J.both_pct.toFixed(1)+'%</b></div>'
+     +'<div class="row"><span>Typical trades to Phase 1 / Phase 2 / total</span><b>'+dash(J.med_trades_p1)+' / '+dash(J.med_trades_p2)+' / '+dash(J.med_trades_total)+'</b></div>'
+     +'<div class="row"><span>Typical drawdown / worst drawdown</span><b>'+J.typ_dd.toFixed(1)+'% / '+J.worst_dd.toFixed(1)+'%</b></div>'
+     +'<div class="row"><span>Typical losing streak / worst</span><b>'+dash(J.typ_streak)+' / '+dash(J.worst_streak)+' trades</b></div>'
      +'</div>';
   }
 
-  // ============ STRATEGY EDGE (is it real, or drift?) ============
-  if(r.edge){ const E=r.edge; const noEdge=(''+E.hold_quality).indexOf('NO CLEAR')>=0;
-    h+='<div class="card"><div style="font-size:14px;color:#8ab4f8;font-weight:700;letter-spacing:.4px;margin-bottom:4px">STRATEGY EDGE</div>'
-     +'<div style="font-size:11px;color:#5b6675;margin-bottom:10px">A real edge beats the aligned drift benchmark AND its own inverse loses. Positive expectancy alone is not enough.</div>'
+  // ================= B. REAL-ORDER SEQUENTIAL =================
+  if(r.sequential){ const S=r.sequential, P1=S.p1, P2=S.p2, F=S.full;
+    const prow=function(o){return '<td>'+(o===null||o===undefined?'&mdash;':o.toFixed(1)+'%')+'</td>';};
+    h+='<div class="card" style="border-color:#2f4a86"><div style="font-size:13px;color:#8ab4f8;font-weight:700">B. REAL-ORDER SEQUENTIAL &mdash; HISTORICAL TRADE ORDER PRESERVED</div>'
+     +'<div style="font-size:11px;color:#5b6675;margin:4px 0 10px">Each historical trade is used in its actual chronological order; losing clusters are preserved. '
+     +'A challenge is started at every one of the '+S.starts+' historical trades.</div>'
+     +'<table><tr><th></th><th>Pass</th><th>Max loss</th><th>Daily loss</th><th>Never reached</th></tr>'
+     +'<tr><td>Phase 1 <span style="color:#5b6675">(all starts)</span></td>'+prow(P1.PASS)+prow(P1.FAIL_MAXLOSS)+prow(P1.FAIL_DAILY)+prow(P1.TIMEOUT)+'</tr>'
+     +'<tr><td>Phase 2 <span style="color:#5b6675">(conditional)</span></td>'+prow(P2.PASS)+prow(P2.FAIL_MAXLOSS)+prow(P2.FAIL_DAILY)+prow(P2.TIMEOUT)+'</tr>'
+     +'</table>'
+     +'<div style="font-size:11px;color:#5b6675;margin:6px 0 10px">Phase 2 row = <b>P(Phase 2 pass | Phase 1 passed)</b>, measured on the '
+     +P2.evaluated+' paths that actually completed Phase 1. It is NOT the overall probability of completing Phase 2.</div>'
+     +'<table><tr><th>Timing (calendar days)</th><th>Median</th><th>25th</th><th>75th</th><th>90th</th><th>Worst</th></tr>'
+     +'<tr><td>Phase 1</td><td>'+dash(P1.med_days)+'</td><td>'+dash(P1.d25)+'</td><td>'+dash(P1.d75)+'</td><td>'+dash(P1.d90)+'</td><td>'+dash(P1.worst_days)+'</td></tr>'
+     +'<tr><td>Phase 2</td><td>'+dash(P2.med_days)+'</td><td>'+dash(P2.d25)+'</td><td>'+dash(P2.d75)+'</td><td>'+dash(P2.d90)+'</td><td>'+dash(P2.worst_days)+'</td></tr>'
+     +'<tr><td><b>Full 2-step</b></td><td><b>'+dash(F.med_days)+'</b></td><td>&mdash;</td><td>'+dash(F.d75)+'</td><td>'+dash(F.d90)+'</td><td>'+dash(F.worst_days)+'</td></tr>'
+     +'</table>'
+     +'<div style="margin-top:10px;padding-top:10px;border-top:1px solid #242a33">'
+     +'<div class="row"><span><b>SEQUENTIAL FULL 2-STEP PASS</b></span><b style="color:#8ab4f8;font-size:16px">'+F.pass_pct.toFixed(1)+'%</b></div>'
+     +'<div class="row"><span>Full sequential failure</span><b>'+F.fail_pct.toFixed(1)+'%</b></div>'
+     +'<div class="row"><span>Phase 1 passed but Phase 2 failed</span><b>'+F.p1_pass_p2_fail_pct.toFixed(1)+'%</b></div>'
+     +'<div class="row"><span>Phase 1 failed</span><b>'+F.p1_fail_pct.toFixed(1)+'%</b></div>'
+     +'<div class="row"><span>Median total trades</span><b>'+dash(F.med_trades)+'</b></div>'
+     +'</div></div>';
+  }
+
+  // ================= C. ONE HISTORICAL PATH =================
+  if(r.deterministic){ const D=r.deterministic;
+    const NM={'PASS':'PASSED','FAIL_MAXLOSS':'FAILED (max loss)','FAIL_DAILY':'FAILED (daily loss)','TIMEOUT':'target not reached','NOT REACHED':'NOT REACHED'};
+    const nm=function(x){return NM[x]||x;};
+    h+='<div class="card"><div style="font-size:13px;color:#93a0b0;font-weight:700">C. ONE HISTORICAL PATH &mdash; DETERMINISTIC</div>'
+     +'<div style="font-size:11px;color:#5b6675;margin:4px 0 10px">A single realisation: the actual trade sequence from the first trade onward. '
+     +'<b>This is one path, not a probability.</b></div>'
+     +'<div class="row"><span>Phase 1 result</span><b>'+nm(D.p1_outcome)+'</b></div>'
+     +'<div class="row"><span>Phase 2 result</span><b>'+nm(D.p2_outcome)+'</b></div>'
+     +'<div class="row"><span>Full challenge</span><b>'+D.full+'</b></div>'
+     +'<div class="row"><span>Trades to Phase 1 / Phase 2 / total</span><b>'+dash(D.p1_trades)+' / '+dash(D.p2_trades)+' / '+dash(D.total_trades)+'</b></div>'
+     +'<div class="row"><span>Calendar days to Phase 1 / Phase 2 / total</span><b>'+dash(D.p1_days)+' / '+dash(D.p2_days)+' / '+dash(D.total_days)+'</b></div>'
+     +'<div class="row"><span>Worst balance / final balance</span><b>$'+Math.round(D.worst_balance).toLocaleString()+' / $'+Math.round(D.final_balance).toLocaleString()+'</b></div>'
+     +'<div class="row"><span>Maximum drawdown on this path</span><b>'+D.max_dd_pct.toFixed(1)+'%</b></div>'
+     +'</div>';
+  }
+
+  // ================= TIME TO TARGET =================
+  if(r.prop && r.sequential){ const P=r.prop, S=r.sequential;
+    h+='<div class="card"><div style="font-size:13px;color:#8ab4f8;font-weight:700;margin-bottom:3px">TIME TO TARGET</div>'
+     +'<div style="font-size:11px;color:#5b6675;margin-bottom:10px">Calendar days include weekends and periods with no trade. '
+     +'They are not trading days, not bars, and not trades &mdash; each is labelled separately.</div>'
+     +'<div class="row"><span>Trade frequency</span><b>'+dash(P.trades_per_year)+' trades/year</b></div>'
+     +'<div class="row"><span>Average calendar days between trades</span><b>'+dash(P.avg_days_between)+'</b></div>'
+     +'<div class="row"><span>Distinct days on which it traded</span><b>'+dash(P.active_days)+' trading days</b></div>'
+     +'<div class="row"><span>Phase 1 &mdash; median trades / days / 75th / 90th</span><b>'
+       +dash(S.p1.med_trades)+' trades &middot; '+dash(S.p1.med_days)+' / '+dash(S.p1.d75)+' / '+dash(S.p1.d90)+' days</b></div>'
+     +'<div class="row"><span>Phase 2 &mdash; median trades / days / 75th / 90th</span><b>'
+       +dash(S.p2.med_trades)+' trades &middot; '+dash(S.p2.med_days)+' / '+dash(S.p2.d75)+' / '+dash(S.p2.d90)+' days</b></div>'
+     +'<div class="row"><span><b>Full 2-step &mdash; median / 75th / 90th / worst</b></span><b>'
+       +dash(S.full.med_days)+' / '+dash(S.full.d75)+' / '+dash(S.full.d90)+' / '+dash(S.full.worst_days)+' days</b></div>'
+     +'</div>';
+  }
+
+  // ================= RISK COMPARISON =================
+  if(r.risk_table && r.risk_table.length){
+    h+='<div class="card"><div style="font-size:13px;color:#8ab4f8;font-weight:700;margin-bottom:3px">RISK COMPARISON</div>'
+     +'<div style="font-size:11px;color:#5b6675;margin-bottom:10px">Identical strategy and identical trades in every row &mdash; only the account risk setting changes.</div>'
+     +'<div style="overflow-x:auto"><table><tr><th>Risk</th><th>P1 seq</th><th>P2 seq|P1</th><th>FULL 2-step seq</th><th>MC both (shuffled)</th><th>Max loss</th><th>Daily loss</th><th>Median days</th><th>Typ DD</th><th>Worst DD</th></tr>';
+    r.risk_table.forEach(function(x){
+      var cur = Math.abs(x.risk - r.prop.risk_pct) < 1e-9;
+      h+='<tr'+(cur?' style="background:#1b2330"':'')+'><td>'+x.risk.toFixed(2)+'%'+(cur?' <span style="color:#8ab4f8">&larr;</span>':'')+'</td>'
+       +'<td>'+x.seq_p1.toFixed(1)+'%</td><td>'+x.seq_p2_cond.toFixed(1)+'%</td>'
+       +'<td><b>'+x.seq_full.toFixed(1)+'%</b></td><td>'+x.mc_both.toFixed(1)+'%</td>'
+       +'<td>'+x.maxloss.toFixed(1)+'%</td><td>'+x.daily.toFixed(1)+'%</td>'
+       +'<td>'+dash(x.med_days)+'</td><td>'+x.typ_dd.toFixed(1)+'%</td>'
+       +'<td style="color:'+(x.worst_dd>=r.prop.max_loss?'#ff9b9b':'#c3cede')+'">'+x.worst_dd.toFixed(1)+'%</td></tr>';
+    });
+    h+='</table></div><div style="font-size:11px;color:#5b6675;margin-top:6px">'
+     +'Worst DD is the 95th-percentile shuffled drawdown; values at or above your '+r.prop.max_loss+'% maximum-loss limit are shown in red.</div></div>';
+  }
+
+  // ================= STRATEGY EDGE =================
+  if(r.edge){ const E=r.edge, T=r.trust||{};
+    h+='<div class="card"><div style="font-size:13px;color:#8ab4f8;font-weight:700;margin-bottom:3px">STRATEGY EDGE</div>'
+     +'<div style="font-size:11px;color:#5b6675;margin-bottom:10px">Measured in R. These figures describe the strategy only &mdash; changing account settings must never move them.</div>'
      +'<div class="row"><span>Development expectancy</span><b style="color:'+rcol(E.dev)+'">'+E.dev+'R</b></div>'
      +'<div class="row"><span>Validation expectancy</span><b style="color:'+rcol(E.val)+'">'+E.val+'R</b></div>'
-     +'<div class="row"><span>Holdout expectancy '+H('heo','Unseen data the strategy was never tuned on. Compared against this engine\'s execution-noise floor, not just zero.')+'</span>'
-        +'<b>'+E.hold+'R &middot; '+E.hold_n+' trades &middot; t '+dash(E.hold_t)+' '
-        +(noEdge?'<span class="pill bad">'+E.hold_quality+'</span>':'<span class="pill ok">CLEAR EDGE</span>')+'</b></div>'
-     +'<div class="row"><span>Overall t-stat '+H('hot','How far the full-sample expectancy sits from zero in standard errors. Under about 2 the result is not statistically distinguishable from luck, however good the average looks.')+'</span>'
-        +'<b style="color:'+((E.overall_t>=2)?'#7ee2a0':'#ffd88a')+'">'+dash(E.overall_t)+'</b></div>'
+     +'<div class="row"><span>Holdout expectancy</span><b style="color:'+rcol(E.hold)+'">'+E.hold+'R</b></div>'
+     +'<div class="row"><span>Holdout trade count</span><b>'+E.hold_n+(E.hold_n<100?' <span class="pill bad">SMALL HOLDOUT SAMPLE</span>':'')+'</b></div>'
+     +'<div class="row"><span>Holdout t-stat</span><b style="color:'+((E.hold_t>=2)?'#7ee2a0':'#ffd88a')+'">'+dash(E.hold_t)+'</b></div>'
+     +'<div class="row"><span>Overall t-stat</span><b style="color:'+((E.overall_t>=2)?'#7ee2a0':'#ffd88a')+'">'+dash(E.overall_t)+'</b></div>'
      +'<div class="row"><span>Profit factor</span><b>'+E.pf+'</b></div>'
      +'<div class="row"><span>Win rate</span><b>'+E.win+'%</b></div>'
      +'<div class="row"><span>Sharpe</span><b>'+E.sharpe+'</b></div>'
      +'<div class="row"><span>Trade count</span><b>'+E.trades+'</b></div>'
-     +'<div class="row"><span>Expectancy at 3x cost</span><b style="color:'+rcol(E.cost3x)+'">'+dash(E.cost3x)+'R</b></div>'
+     +'<div class="row"><span>3x cost expectancy</span><b style="color:'+rcol(E.cost3x)+'">'+dash(E.cost3x)+'R</b></div>'
      +'<div class="row"><span>Benchmark expectancy ('+E.bench_aligned+'-only drift)</span><b>'+E.bench+'R</b></div>'
-     +'<div class="row"><span><b>Edge vs benchmark</b> '+H('hev','Strategy expectancy minus the matched always-'+E.bench_aligned+' benchmark. If this is ~0, the strategy is just riding drift (e.g. gold\'s uptrend), not timing anything.')+'</span>'
-        +'<b style="color:'+rcol(E.edge_vs_bench)+'">'+E.edge_vs_bench+'R</b></div>'
-     +'<div class="row"><span>Inverted-strategy expectancy (BUY&#8596;SELL)</span><b style="color:'+rcol(-E.inverted)+'">'+E.inverted+'R</b></div>'
-     +'<div style="font-size:11px;color:#5b6675;margin-top:8px">Long-only drift '+E.bench_long+'R &middot; Short-only drift '+E.bench_short+'R</div>'
+     +'<div class="row"><span>Edge vs benchmark</span><b style="color:'+rcol(E.edge_vs_bench)+'">'+E.edge_vs_bench+'R</b></div>'
+     +'<div class="row"><span>Inverted expectancy (BUY&#8596;SELL)</span><b style="color:'+rcol(-E.inverted)+'">'+E.inverted+'R</b></div>'
+     +'<div style="margin-top:10px"><span class="pill '+((T.hold_label==='CLEAR EDGE')?'ok':'bad')+'">'+dash(T.hold_label)+'</span>'
+     +'<span style="font-size:11px;color:#5b6675;margin-left:8px">rule: holdout &gt; '+dash(T.exec_threshold)+'R execution noise AND t &ge; 2.0 AND n &ge; 15</span></div>'
      +'</div>';
   }
 
-  if(r.edge_ok===false){
-    h+='<div class="warn"><b>NO CLEAR EDGE</b><br>This strategy may still make money in the backtest, but it does not clearly beat the drift benchmark, its holdout edge, its inverse, or realistic costs. Passing the prop simulation here would not be reliable evidence of a repeatable edge.</div>';
+  // ================= PROP RISK PROFILE =================
+  if(r.prop && r.mc_joint && r.sequential){ const P=r.prop, J=r.mc_joint, S=r.sequential, T=r.trust||{};
+    h+='<div class="card"><div style="font-size:13px;color:#8ab4f8;font-weight:700;margin-bottom:3px">PROP RISK PROFILE</div>'
+     +'<div style="font-size:11px;color:#5b6675;margin-bottom:10px">Account-dependent. These DO change with your risk setting; the STRATEGY EDGE figures above do not.</div>'
+     +'<div class="row"><span>Risk per trade</span><b>'+P.risk_pct+'% &middot; posture '+dash(T.posture)+'</b></div>'
+     +'<div class="row"><span>Typical / worst drawdown (shuffled)</span><b>'+J.typ_dd.toFixed(1)+'% / '+J.worst_dd.toFixed(1)+'%</b></div>'
+     +'<div class="row"><span>Typical / worst losing streak</span><b>'+dash(J.typ_streak)+' / '+dash(J.worst_streak)+' trades</b></div>'
+     +'<div class="row"><span>Worst streak at this risk</span><b>-'+dash(T.streak_exposure_pct)+'% of account</b></div>'
+     +'<div class="row"><span>Max-loss probability (sequential P1)</span><b>'+S.p1.FAIL_MAXLOSS.toFixed(1)+'%</b></div>'
+     +'<div class="row"><span>Daily-loss probability (sequential P1)</span><b>'+S.p1.FAIL_DAILY.toFixed(1)+'%</b></div>'
+     +'<div class="row"><span>Phase 1 pass (sequential)</span><b>'+S.p1.PASS.toFixed(1)+'%</b></div>'
+     +'<div class="row"><span>Phase 2 pass (sequential, given P1)</span><b>'+S.p2.PASS.toFixed(1)+'%</b></div>'
+     +'<div class="row"><span><b>Full challenge pass (sequential)</b></span><b style="color:#8ab4f8">'+S.full.pass_pct.toFixed(1)+'%</b></div>'
+     +'<div class="row"><span>Median time to pass</span><b>'+dash(S.full.med_days)+' calendar days</b></div>'
+     +'</div>';
   }
+
+  // ================= CONTRIBUTION / YEARS / BEST DAY =================
+  if(r.concentration && r.concentration.levels && r.concentration.levels.length){
+    h+='<div class="card"><div style="font-size:13px;color:#93a0b0;font-weight:700;margin-bottom:8px">TRADE CONTRIBUTION CHECK</div>'
+     +'<table><tr><th>Winners removed</th><th>Expectancy without them</th><th>Their share of total R</th></tr>';
+    r.concentration.levels.forEach(function(L){
+      h+='<tr><td>top '+L.k+'</td><td style="color:'+rcol(L.expR_without)+'">'+L.expR_without.toFixed(4)+'R</td><td>'+L.pct_of_totR.toFixed(1)+'%</td></tr>';});
+    h+='</table><div style="font-size:11px;color:#5b6675;margin-top:6px">Baseline expectancy '+r.concentration.expR.toFixed(4)+'R. '
+     +'If removing a few winners collapses the edge, the result depends on outliers.</div></div>';
+  }
+  if(r.yearly && r.yearly.length){
+    h+='<div class="card"><div style="font-size:13px;color:#93a0b0;font-weight:700;margin-bottom:8px">YEAR / REGIME BREAKDOWN</div>'
+     +'<table><tr><th>Year</th><th>Trades</th><th>Expectancy</th><th>PF</th><th>Win rate</th></tr>';
+    r.yearly.forEach(function(y){h+='<tr><td>'+y.year+'</td><td>'+y.n+'</td><td style="color:'+rcol(y.expR)+'">'+y.expR.toFixed(3)+'R</td><td>'+y.pf.toFixed(2)+'</td><td>'+y.win.toFixed(1)+'%</td></tr>';});
+    h+='</table><div style="font-size:11px;color:#5b6675;margin-top:6px">Not every year needs to be profitable. This shows whether the edge is concentrated in one period.</div></div>';
+  }
+  if(r.best_day && r.best_day.enabled){ const B=r.best_day;
+    h+='<div class="card"><div style="font-size:13px;color:#93a0b0;font-weight:700;margin-bottom:8px">BEST DAY RULE</div>'
+     +'<div class="row"><span>Best single day</span><b>$'+Math.round(B.best_day).toLocaleString()+'</b></div>'
+     +'<div class="row"><span>Total positive-day profit</span><b>$'+Math.round(B.total_positive).toLocaleString()+'</b></div>'
+     +'<div class="row"><span>Best day as % of positive profit</span><b>'+(B.best_day_pct===null?'&mdash;':B.best_day_pct.toFixed(1)+'%')+'</b></div>'
+     +'<div class="row"><span>Rule threshold</span><b>'+B.threshold+'%</b></div>'
+     +'<div class="row"><span>Status</span><b>'+(B.compliant===null?'&mdash;':(B.compliant?'PASS':'NOT YET SATISFIED'))+'</b></div>'
+     +'<div style="font-size:11px;color:#5b6675;margin-top:6px">An oversized winning day is not an instant failure: the simulation keeps trading until the ratio complies.</div></div>';
+  }
+
+  // ================= WHAT SHOULD I TRUST =================
+  if(r.trust){ const T=r.trust;
+    h+='<div class="card"><div style="font-size:13px;color:#93a0b0;font-weight:700;margin-bottom:8px">WHAT SHOULD I TRUST?</div>'
+     +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px">'
+     +'<div><div style="font-size:11px;color:#7ee2a0;text-transform:uppercase;margin-bottom:4px">Higher trust</div><ul style="margin:0 0 0 16px;padding:0;line-height:1.7;font-size:13px">'
+     +T.higher_trust.map(function(x){return '<li>'+x+'</li>';}).join('')+'</ul></div>'
+     +'<div><div style="font-size:11px;color:#ff9b9b;text-transform:uppercase;margin-bottom:4px">Lower trust</div><ul style="margin:0 0 0 16px;padding:0;line-height:1.7;font-size:13px">'
+     +T.lower_trust.map(function(x){return '<li>'+x+'</li>';}).join('')+'</ul></div></div></div>';
+  }
+
   if(r.exec_sensitive){
     h+='<div class="warn"><b>EXECUTION-SENSITIVE</b> ('+String(r.exec_threshold)+'R)<br>'
      +'Expectancy is smaller than this engine\'s measured execution uncertainty, so its <b>sign is not trustworthy</b> '
