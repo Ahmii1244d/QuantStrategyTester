@@ -126,7 +126,15 @@ canvas{width:100%;height:180px;background:#0b0e12;border-radius:8px;border:1px s
     <div><label>Max total loss (%)</label><input id="max_loss"></div>
     <div><label>Risk per trade (%)</label><input id="risk_pct"></div>
     <div><label>Min trading days (optional)</label><input id="min_days"></div>
-    <div><label>Best Day Rule cap (%, 0=off)</label><input id="best_day_pct"></div>
+    <div><label>Consistency: best DAY cap (%, 0=off)</label><input id="best_day_pct"></div>
+    <div><label>Consistency: best TRADE cap (%, 0=off)</label><input id="best_trade_pct"></div>
+  </div>
+  <div style="font-size:11px;color:#5b6675;margin-top:8px">
+    What most firms call the <b>consistency rule</b> IS the best-DAY rule: your largest winning day
+    may not exceed X% of total profit (typical caps 20-45%). The best-TRADE cap is the separate,
+    less common variant applied to a single trade. Set either to 0 to switch that rule off.
+    Lot-size consistency is not simulated: this engine risks a fixed fraction on every trade, so
+    max/avg position risk is always exactly 1.000 and such a rule could never trigger.
   </div>
   <button class="sm" style="margin:12px 0 0 0" onclick="saveCfg()">SAVE ACCOUNT</button>
 </div>
@@ -157,7 +165,7 @@ async function boot(){
   CFG=r.cfg; document.getElementById('code').value=r.code;
   document.getElementById('dir').value=CFG.dataset_dir;
   document.getElementById('sym').value=CFG.symbol;
-  ['balance','phase1','phase2','daily_loss','max_loss','risk_pct','min_days','best_day_pct']
+  ['balance','phase1','phase2','daily_loss','max_loss','risk_pct','min_days','best_day_pct','best_trade_pct']
     .forEach(k=>document.getElementById(k).value=CFG[k]);
   const d=r.ds; let s='';
   if(!d.ok){ s='<span style="color:#ff9b9b">! '+d.msg+'</span>'; }
@@ -169,7 +177,7 @@ async function boot(){
 }
 async function saveCfg(){
   const c={dataset_dir:document.getElementById('dir').value,symbol:document.getElementById('sym').value};
-  ['balance','phase1','phase2','daily_loss','max_loss','risk_pct','min_days','best_day_pct']
+  ['balance','phase1','phase2','daily_loss','max_loss','risk_pct','min_days','best_day_pct','best_trade_pct']
     .forEach(k=>c[k]=parseFloat(document.getElementById(k).value)||0);
   await fetch('/api/config',{method:'POST',body:JSON.stringify(c)});
   location.reload();
@@ -466,14 +474,22 @@ function render(r){
     r.yearly.forEach(function(y){h+='<tr><td>'+y.year+'</td><td>'+y.n+'</td><td style="color:'+rcol(y.expR)+'">'+y.expR.toFixed(3)+'R</td><td>'+y.pf.toFixed(2)+'</td><td>'+y.win.toFixed(1)+'%</td></tr>';});
     h+='</table><div style="font-size:11px;color:#5b6675;margin-top:6px">Not every year needs to be profitable. This shows whether the edge is concentrated in one period.</div></div>';
   }
-  if(r.best_day && r.best_day.enabled){ const B=r.best_day;
-    h+='<div class="card"><div style="font-size:13px;color:#93a0b0;font-weight:700;margin-bottom:8px">BEST DAY RULE</div>'
-     +'<div class="row"><span>Best single day</span><b>$'+Math.round(B.best_day).toLocaleString()+'</b></div>'
-     +'<div class="row"><span>Total positive-day profit</span><b>$'+Math.round(B.total_positive).toLocaleString()+'</b></div>'
-     +'<div class="row"><span>Best day as % of positive profit</span><b>'+(B.best_day_pct===null?'&mdash;':B.best_day_pct.toFixed(1)+'%')+'</b></div>'
-     +'<div class="row"><span>Rule threshold</span><b>'+B.threshold+'%</b></div>'
-     +'<div class="row"><span>Status</span><b>'+(B.compliant===null?'&mdash;':(B.compliant?'PASS':'NOT YET SATISFIED'))+'</b></div>'
-     +'<div style="font-size:11px;color:#5b6675;margin-top:6px">An oversized winning day is not an instant failure: the simulation keeps trading until the ratio complies.</div></div>';
+  if(r.consistency){ const C=r.consistency;
+    const line=function(nm,o){
+      return '<tr><td>'+nm+'</td><td>$'+Math.round(o.best).toLocaleString()+'</td><td>'
+        +(o.pct===null?'&mdash;':o.pct.toFixed(1)+'%')+'</td><td>'
+        +(o.enabled?o.threshold+'%':'<span style="color:#5b6675">off</span>')+'</td><td>'
+        +(o.compliant===null?'&mdash;':(o.compliant
+            ?'<span class="pill ok">PASS</span>'
+            :'<span class="pill bad">NOT YET SATISFIED</span>'))+'</td></tr>';};
+    h+='<div class="card"><div style="font-size:13px;color:#93a0b0;font-weight:700;margin-bottom:3px">CONSISTENCY RULES</div>'
+     +'<div style="font-size:11px;color:#5b6675;margin-bottom:10px">What firms call "the consistency rule" is the best-DAY rule &mdash; the same mechanic, not a second constraint. Best-TRADE is the distinct variant.</div>'
+     +'<table><tr><th>Rule</th><th>Largest</th><th>Share of profit</th><th>Cap</th><th>Status</th></tr>'
+     +line('Best winning DAY',C.day)+line('Best single TRADE',C.trade)+'</table>'
+     +'<div class="row" style="margin-top:8px"><span>Total positive-day profit</span><b>$'+Math.round(C.total_positive).toLocaleString()+'</b></div>'
+     +'<div class="row"><span>Trading days (with &gt;1 trade)</span><b>'+C.total_trading_days+' ('+C.days_with_multiple_trades+')</b></div>'
+     +'<div style="font-size:11px;color:#5b6675;margin-top:8px">A violation is <b>not</b> an instant failure: the simulation keeps trading until the ratio complies, as a real challenge requires. '
+     +'Lot-size consistency is reported, not simulated &mdash; '+C.lot_size.note+'.</div></div>';
   }
 
   // ================= WHAT SHOULD I TRUST =================
@@ -521,8 +537,12 @@ function render(r){
    +'<div class="row"><span>Trades taken before it stopped</span><b>'+a.trades_taken+'</b></div></div>'
    +'<div style="font-size:11px;color:#5b6675;margin:6px 0 12px">'+(r.sizing||'')+'</div>';
 
-  h+='<div class="card"><div style="font-size:12px;color:#93a0b0;margin-bottom:8px">EQUITY CURVE</div>'
-   +'<canvas id="eq"></canvas><div style="font-size:12px;color:#93a0b0;margin:10px 0 8px">DRAWDOWN</div>'
+  h+='<div class="card"><div style="font-size:13px;color:#8ab4f8;font-weight:700;margin-bottom:3px">ACCOUNT EQUITY</div>'
+   +'<div style="font-size:11px;color:#5b6675;margin-bottom:8px">'+(r.sizing||'')
+   +' &middot; one point per trade. Dashed lines are your configured Phase&nbsp;1 target and maximum-loss floor.</div>'
+   +'<canvas id="eq"></canvas>'
+   +'<div style="font-size:13px;color:#8ab4f8;font-weight:700;margin:14px 0 3px">DRAWDOWN FROM PEAK</div>'
+   +'<div style="font-size:11px;color:#5b6675;margin-bottom:8px">How far below its own high-water mark the account sat, in percent.</div>'
    +'<canvas id="dd"></canvas></div>';
 
   h+='<div class="card"><div style="font-size:12px;color:#93a0b0;margin-bottom:8px">OUT-OF-SAMPLE'
@@ -549,18 +569,195 @@ function render(r){
       if(t[k]!==undefined) ts+='<span style="margin-right:14px">'+k+': '+t[k].toFixed(2)+'s</span>';});
     h+='<div style="font-size:11px;color:#5b6675;margin:10px 0">'+(r.mode||'').toUpperCase()+' &middot; '+ts+'</div>';
   }
+  if(r.text_report){
+    h+='<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">'
+     +'<div><div style="font-size:13px;color:#8ab4f8;font-weight:700">FULL REPORT &mdash; PLAIN TEXT</div>'
+     +'<div style="font-size:11px;color:#5b6675">Everything above, in one copyable block.</div></div>'
+     +'<div><button class="sm" id="copybtn" style="margin:0" onclick="copyReport()">COPY REPORT</button>'
+     +'<button class="sm" onclick="dlReport()">DOWNLOAD .TXT</button></div></div>'
+     +'<pre id="rptxt" style="margin:0;max-height:460px;overflow:auto;background:#0b0e12;border:1px solid #242a33;'
+     +'border-radius:8px;padding:14px;font:12px/1.5 Consolas,Monaco,monospace;color:#c3cede;white-space:pre;'
+     +'user-select:text;-webkit-user-select:text">'
+     + String(r.text_report).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+     +'</pre></div>';
+  }
   h+='<button class="sm" style="margin:0" onclick="dl()">DOWNLOAD CODE</button>';
   o.innerHTML=h;
-  draw('eq',r.equity,'#2a6df4'); draw('dd',r.drawdown,'#e05555');
+  drawEquity('eq', r.equity, r.equity_dates, r.equity_levels);
+  drawDrawdown('dd', r.drawdown, r.equity_dates, (r.prop ? r.prop.max_loss : null));
 }
-function draw(id,d,col){
-  const c=document.getElementById(id); if(!c||!d||!d.length) return;
-  const w=c.width=c.clientWidth*2, hh=c.height=360, x=c.getContext('2d');
-  const mn=Math.min.apply(null,d), mx=Math.max.apply(null,d), rg=(mx-mn)||1;
-  x.strokeStyle=col; x.lineWidth=3; x.beginPath();
-  d.forEach((v,i)=>{const px=i/(d.length-1)*w, py=hh-((v-mn)/rg)*(hh-20)-10;
-    if(i) x.lineTo(px,py); else x.moveTo(px,py);});
+function fmtMoney(v){
+  var a=Math.abs(v);
+  if(a>=1e6) return '$'+(v/1e6).toFixed(2)+'M';
+  if(a>=1e3) return '$'+(v/1e3).toFixed(1)+'k';
+  return '$'+Math.round(v);
+}
+function niceStep(range,target){
+  var raw=range/Math.max(target,1), p=Math.pow(10,Math.floor(Math.log(raw)/Math.LN10));
+  var n=raw/p; var m=(n<=1?1:n<=2?2:n<=5?5:10);
+  return m*p;
+}
+function prepCanvas(c,cssH){
+  var dpr=window.devicePixelRatio||1;
+  var w=c.clientWidth||700;
+  c.style.height=cssH+'px';
+  c.width=Math.round(w*dpr); c.height=Math.round(cssH*dpr);
+  var x=c.getContext('2d'); x.setTransform(dpr,0,0,dpr,0,0);
+  return {x:x,w:w,h:cssH};
+}
+// ---------------- EQUITY ----------------
+function drawEquity(id,data,dates,levels){
+  var c=document.getElementById(id); if(!c||!data||!data.length) return;
+  var P=prepCanvas(c,260), x=P.x, W=P.w, H=P.h;
+  var ml=64, mr=12, mt=14, mb=26;
+  var pw=W-ml-mr, ph=H-mt-mb;
+  x.clearRect(0,0,W,H);
+
+  var lo=Math.min.apply(null,data), hi=Math.max.apply(null,data);
+  if(levels){
+    if(levels.max_loss_floor!=null) lo=Math.min(lo,levels.max_loss_floor);
+    if(levels.p1_target!=null)      hi=Math.max(hi,levels.p1_target);
+    if(levels.start!=null){ lo=Math.min(lo,levels.start); hi=Math.max(hi,levels.start); }
+  }
+  var pad=(hi-lo)*0.08||1; lo-=pad; hi+=pad;
+  var Y=function(v){ return mt+ph-((v-lo)/(hi-lo))*ph; };
+  var X=function(i){ return ml+(i/(data.length-1))*pw; };
+
+  // grid + y labels
+  var step=niceStep(hi-lo,5);
+  x.font='10px -apple-system,Segoe UI,Roboto,sans-serif'; x.textAlign='right';
+  for(var v=Math.ceil(lo/step)*step; v<=hi; v+=step){
+    var yy=Y(v);
+    x.strokeStyle='#1e242c'; x.lineWidth=1;
+    x.beginPath(); x.moveTo(ml,yy); x.lineTo(ml+pw,yy); x.stroke();
+    x.fillStyle='#5b6675'; x.fillText(fmtMoney(v),ml-6,yy+3);
+  }
+  // reference levels
+  function refLine(val,col,label){
+    if(val==null||val<lo||val>hi) return;
+    var yy=Y(val);
+    x.save(); x.setLineDash([5,4]); x.strokeStyle=col; x.lineWidth=1.5;
+    x.beginPath(); x.moveTo(ml,yy); x.lineTo(ml+pw,yy); x.stroke(); x.restore();
+    x.fillStyle=col; x.textAlign='left'; x.font='10px -apple-system,Segoe UI,Roboto,sans-serif';
+    x.fillText(label,ml+4,yy-4); x.textAlign='right';
+  }
+  if(levels){
+    refLine(levels.start,'#5b6675','start');
+    refLine(levels.p1_target,'#7ee2a0','Phase 1 target');
+    refLine(levels.max_loss_floor,'#ff6b6b','MAX LOSS - account dies');
+  }
+  // peak-to-trough shading (largest drawdown)
+  var peak=data[0],pi=0,bi=0,bj=0,worst=0;
+  for(var i=0;i<data.length;i++){
+    if(data[i]>peak){peak=data[i];pi=i;}
+    var d=peak-data[i];
+    if(d>worst){worst=d;bi=pi;bj=i;}
+  }
+  if(worst>0&&bj>bi){
+    x.fillStyle='rgba(224,85,85,.13)';
+    x.fillRect(X(bi),mt,X(bj)-X(bi),ph);
+  }
+  // area under equity
+  var g=x.createLinearGradient(0,mt,0,mt+ph);
+  g.addColorStop(0,'rgba(42,109,244,.28)'); g.addColorStop(1,'rgba(42,109,244,0)');
+  x.beginPath(); x.moveTo(X(0),Y(data[0]));
+  for(var i=1;i<data.length;i++) x.lineTo(X(i),Y(data[i]));
+  x.lineTo(X(data.length-1),mt+ph); x.lineTo(X(0),mt+ph); x.closePath();
+  x.fillStyle=g; x.fill();
+  // equity line
+  x.strokeStyle='#4d8cff'; x.lineWidth=1.8; x.beginPath();
+  for(var i=0;i<data.length;i++){ var px=X(i),py=Y(data[i]); if(i) x.lineTo(px,py); else x.moveTo(px,py); }
   x.stroke();
+  // x labels (dates)
+  if(dates&&dates.length===data.length){
+    x.fillStyle='#5b6675'; x.font='10px -apple-system,Segoe UI,Roboto,sans-serif';
+    var ticks=Math.min(6,dates.length);
+    for(var k=0;k<ticks;k++){
+      var idx=Math.round(k*(dates.length-1)/(ticks-1));
+      x.textAlign=(k===0?'left':(k===ticks-1?'right':'center'));
+      x.fillText(String(dates[idx]).slice(0,7),X(idx),H-8);
+    }
+  }
+  x.textAlign='left'; x.fillStyle='#93a0b0'; x.font='10px -apple-system,Segoe UI,Roboto,sans-serif';
+  if(worst>0) x.fillText('shaded = largest peak-to-trough decline ('+fmtMoney(worst)+')',ml+4,mt+10);
+}
+// ---------------- DRAWDOWN ----------------
+function drawDrawdown(id,data,dates,maxLossPct){
+  var c=document.getElementById(id); if(!c||!data||!data.length) return;
+  var P=prepCanvas(c,180), x=P.x, W=P.w, H=P.h;
+  var ml=64, mr=12, mt=12, mb=26;
+  var pw=W-ml-mr, ph=H-mt-mb;
+  x.clearRect(0,0,W,H);
+
+  var worst=Math.min.apply(null,data);           // most negative
+  var lo=Math.min(worst,-(maxLossPct||0))*1.12; if(lo>=0) lo=-1;
+  var hi=0;
+  var Y=function(v){ return mt+((v-hi)/(lo-hi))*ph; };
+  var X=function(i){ return ml+(i/(data.length-1))*pw; };
+
+  var step=niceStep(Math.abs(lo),4);
+  x.font='10px -apple-system,Segoe UI,Roboto,sans-serif'; x.textAlign='right';
+  for(var v=0; v>=lo; v-=step){
+    var yy=Y(v);
+    x.strokeStyle='#1e242c'; x.lineWidth=1;
+    x.beginPath(); x.moveTo(ml,yy); x.lineTo(ml+pw,yy); x.stroke();
+    x.fillStyle='#5b6675'; x.fillText(v.toFixed(0)+'%',ml-6,yy+3);
+  }
+  if(maxLossPct){
+    var yy=Y(-maxLossPct);
+    x.save(); x.setLineDash([5,4]); x.strokeStyle='#ff6b6b'; x.lineWidth=1.5;
+    x.beginPath(); x.moveTo(ml,yy); x.lineTo(ml+pw,yy); x.stroke(); x.restore();
+    x.fillStyle='#ff6b6b'; x.textAlign='left';
+    x.fillText('max loss limit -'+maxLossPct+'%',ml+4,yy-4);
+  }
+  x.beginPath(); x.moveTo(X(0),Y(0));
+  for(var i=0;i<data.length;i++) x.lineTo(X(i),Y(data[i]));
+  x.lineTo(X(data.length-1),Y(0)); x.closePath();
+  x.fillStyle='rgba(224,85,85,.30)'; x.fill();
+  x.strokeStyle='#e05555'; x.lineWidth=1.5; x.beginPath();
+  for(var i=0;i<data.length;i++){ var px=X(i),py=Y(data[i]); if(i) x.lineTo(px,py); else x.moveTo(px,py); }
+  x.stroke();
+  // worst marker
+  var wi=data.indexOf(worst);
+  if(wi>=0){
+    x.fillStyle='#ff9b9b';
+    x.beginPath(); x.arc(X(wi),Y(worst),3,0,6.283); x.fill();
+    x.textAlign=(wi>data.length*0.75?'right':'left');
+    x.fillText('worst '+worst.toFixed(1)+'%',X(wi)+(wi>data.length*0.75?-6:6),Y(worst)+12);
+  }
+  if(dates&&dates.length===data.length){
+    x.fillStyle='#5b6675';
+    var ticks=Math.min(6,dates.length);
+    for(var k=0;k<ticks;k++){
+      var idx=Math.round(k*(dates.length-1)/(ticks-1));
+      x.textAlign=(k===0?'left':(k===ticks-1?'right':'center'));
+      x.fillText(String(dates[idx]).slice(0,7),X(idx),H-8);
+    }
+  }
+}
+function copyReport(){
+  var el=document.getElementById('rptxt'); if(!el) return;
+  var txt=el.textContent||el.innerText||'';
+  var done=function(){
+    var b=document.getElementById('copybtn');
+    if(b){ var o=b.textContent; b.textContent='COPIED'; setTimeout(function(){b.textContent=o;},1400); }
+  };
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(done,function(){fallbackCopy(txt,done);});
+  } else fallbackCopy(txt,done);
+}
+function fallbackCopy(txt,done){
+  var ta=document.createElement('textarea');
+  ta.value=txt; ta.style.position='fixed'; ta.style.opacity='0';
+  document.body.appendChild(ta); ta.select();
+  try{ document.execCommand('copy'); done(); }catch(e){}
+  document.body.removeChild(ta);
+}
+function dlReport(){
+  var el=document.getElementById('rptxt'); if(!el) return;
+  var b=new Blob([el.textContent],{type:'text/plain'});
+  var a=document.createElement('a'); a.href=URL.createObjectURL(b);
+  a.download='proplab_report_'+new Date().toISOString().slice(0,10)+'.txt'; a.click();
 }
 function dl(){
   const b=new Blob([document.getElementById('code').value],{type:'text/plain'});

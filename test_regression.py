@@ -386,14 +386,55 @@ ck("R8: calendar span exceeds distinct trading days",
 print("\n=== R9: Best Day rule modelled, not treated as instant failure ===")
 _bd = _copy.deepcopy(cfg); _bd["best_day_pct"] = 20.0
 r_bd = A.run_test(MTF, _bd, mode="fast")
-ck("R9: best-day report present when enabled",
-   r_bd["best_day"]["enabled"] and r_bd["best_day"]["threshold"] == 20.0)
+ck("R9: consistency report present when the best-DAY rule is enabled",
+   r_bd["consistency"]["day"]["enabled"] and r_bd["consistency"]["day"]["threshold"] == 20.0)
 ck("R9: enabling the rule does not zero out passes (no instant-fail)",
    r_bd["sequential"]["p1"]["PASS"] >= 0.0 and r_bd["sequential"] is not None,
    f"p1 pass {r_bd['sequential']['p1']['PASS']:.1f}%")
 ck("R9: stricter best-day cap cannot INCREASE the pass rate",
    r_bd["sequential"]["full"]["pass_pct"] <= rr_["sequential"]["full"]["pass_pct"] + 1e-9,
    f"{rr_['sequential']['full']['pass_pct']:.1f}% -> {r_bd['sequential']['full']['pass_pct']:.1f}%")
+
+# best-TRADE is a SEPARATE consistency dimension, not a duplicate of best-DAY
+_bt = _copy.deepcopy(cfg); _bt["best_trade_pct"] = 15.0
+r_bt = A.run_test(MTF, _bt, mode="fast")
+ck("R9: best-TRADE rule is independently toggleable",
+   r_bt["consistency"]["trade"]["enabled"] and not r_bt["consistency"]["day"]["enabled"],
+   f"trade cap {r_bt['consistency']['trade']['threshold']}%, day rule off")
+ck("R9: best-TRADE cap cannot raise the pass rate",
+   r_bt["sequential"]["full"]["pass_pct"] <= rr_["sequential"]["full"]["pass_pct"] + 1e-9,
+   f"{rr_['sequential']['full']['pass_pct']:.1f}% -> {r_bt['sequential']['full']['pass_pct']:.1f}%")
+ck("R9: best-DAY and best-TRADE measure different things",
+   r_bd["consistency"]["day"]["pct"] != r_bd["consistency"]["trade"]["pct"],
+   f"day {r_bd['consistency']['day']['pct']:.2f}% vs trade {r_bd['consistency']['trade']['pct']:.2f}%")
+ck("R9: lot-size consistency reported as NOT simulated (can never fire here)",
+   r_bd["consistency"]["lot_size"]["simulated"] is False
+   and r_bd["consistency"]["lot_size"]["max_over_avg_risk"] == 1.0)
+
+print("\n=== R12: copyable plain-text report ===")
+_txt = rr_.get("text_report", "")
+ck("text report present and substantial", len(_txt) > 1500, f"{len(_txt)} chars")
+for _need in ("PROPLAB STRATEGY REPORT", "SHUFFLED MONTE CARLO", "REAL-ORDER SEQUENTIAL",
+              "ONE HISTORICAL PATH", "STRATEGY EDGE", "CONSISTENCY RULES",
+              "SEQUENTIAL FULL 2-STEP PASS", "END OF REPORT"):
+    ck(f"text report contains '{_need}'", _need in _txt)
+ck("text report states Phase 2 is conditional",
+   "P(Phase 2 pass | Phase 1 passed)" in _txt)
+ck("text report labels the one-path section as not a probability",
+   "not a probability" in _txt)
+
+print("\n=== R13: chart data is aligned and self-describing ===")
+ck("equity series and date axis are the same length",
+   len(rr_["equity"]) == len(rr_["equity_dates"]),
+   f"{len(rr_['equity'])} points vs {len(rr_['equity_dates'])} dates")
+_lv = rr_["equity_levels"]
+ck("chart reference levels derive from the configured account",
+   abs(_lv["start"] - cfg["balance"]) < 1e-9
+   and abs(_lv["p1_target"] - cfg["balance"] * (1 + cfg["phase1"] / 100)) < 1e-6
+   and abs(_lv["max_loss_floor"] - cfg["balance"] * (1 - cfg["max_loss"] / 100)) < 1e-6,
+   f"start {_lv['start']}, P1 {_lv['p1_target']:.0f}, floor {_lv['max_loss_floor']:.0f}")
+ck("equity path starts at the configured balance",
+   abs(rr_["equity"][0] - cfg["balance"]) < 0.1, f"{rr_['equity'][0]}")
 
 print("\n=== R10: minimum trading days enforced ===")
 _md = _copy.deepcopy(cfg); _md["min_days"] = 30

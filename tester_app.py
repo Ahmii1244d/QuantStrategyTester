@@ -66,7 +66,13 @@ DEFAULT_CFG = {
     "max_loss": 10.0,
     "risk_pct": 0.25,
     "min_days": 0,
-    "best_day_pct": 0,      # Best Day Rule: best single day <= X% of total profit (0 = rule off)
+    # ---- CONSISTENCY RULES (0 = that rule is off) ----
+    # What prop firms call "the consistency rule" IS the best-day rule: the
+    # largest winning DAY may not exceed X% of total profit. Typical caps run
+    # 20-45%. best_trade_pct is the separate, less common variant applied to a
+    # single TRADE rather than a day.
+    "best_day_pct": 0,      # best single DAY   <= X% of total profit
+    "best_trade_pct": 0,    # best single TRADE <= X% of total profit
     "consistency": 0,
     "hours": "",
 }
@@ -611,18 +617,27 @@ def _pctl(vals, q):
 
 
 def _run_phase(R, exit_days, start, bal0, unit, tgt_pct, dd_pct, floor,
-               min_days, best_day_pct):
+               min_days, best_day_pct, best_trade_pct=0.0):
     """Run ONE phase forward from index `start` in the REAL trade order.
 
-    Returns (outcome, end_index, trades_used, trading_days_used). Honours the
-    configured minimum-trading-days rule and the Best Day rule: reaching the
-    target is not enough if either rule is still unsatisfied - the account keeps
-    trading, exactly as a real challenge would."""
+    Returns (outcome, end_index, trades_used, trading_days_used).
+
+    Honours, in the order a real challenge applies them:
+      * daily-loss and maximum-loss breaches (immediate failure),
+      * the minimum-trading-days rule,
+      * the CONSISTENCY rules - best winning DAY and/or best single TRADE as a
+        share of total profit.
+
+    Consistency is deliberately NOT modelled as an instant failure. Firms
+    require the trader to keep trading until the ratio becomes compliant, so on
+    a violation we continue the loop: further profit on other days dilutes the
+    ratio and the account can still pass later (or time out trying)."""
     bal = bal0
     day = None
     day_start = bal
     used_days = set()
     day_pnl = {}
+    best_trade = 0.0
     n = len(R)
     for k in range(start, n):
         dk = exit_days[k]
@@ -632,20 +647,23 @@ def _run_phase(R, exit_days, start, bal0, unit, tgt_pct, dd_pct, floor,
         used_days.add(dk)
         pnl = R[k] * unit
         bal += pnl
+        if pnl > best_trade:
+            best_trade = pnl
         day_pnl[dk] = day_pnl.get(dk, 0.0) + pnl
         if bal <= day_start * (1 - dd_pct):
             return "FAIL_DAILY", k, k - start + 1, len(used_days)
         if bal <= floor:
             return "FAIL_MAXLOSS", k, k - start + 1, len(used_days)
         if bal >= bal0 * (1 + tgt_pct) and len(used_days) >= min_days:
-            if best_day_pct > 0:
-                profit = bal - bal0
-                pos = [v for v in day_pnl.values() if v > 0]
-                # Best Day rule: the largest winning day may not exceed
-                # best_day_pct of total profit. Not a failure - the trader must
-                # keep trading until the ratio complies, so we continue.
-                if profit > 0 and pos and (max(pos) / profit) > (best_day_pct / 100.0):
-                    continue
+            profit = bal - bal0
+            if profit > 0:
+                if best_day_pct > 0:
+                    pos = [v for v in day_pnl.values() if v > 0]
+                    if pos and (max(pos) / profit) > (best_day_pct / 100.0):
+                        continue
+                if best_trade_pct > 0 and best_trade > 0:
+                    if (best_trade / profit) > (best_trade_pct / 100.0):
+                        continue
             return "PASS", k, k - start + 1, len(used_days)
     return "TIMEOUT", n - 1, n - start, len(used_days)
 
@@ -674,6 +692,7 @@ def sequential_challenge(tr, cfg):
     floor = bal0 * (1 - cfg["max_loss"] / 100.0)
     min_days = int(cfg.get("min_days", 0) or 0)
     bd = float(cfg.get("best_day_pct", 0) or 0)
+    bt = float(cfg.get("best_trade_pct", 0) or 0)
     t1 = cfg["phase1"] / 100.0
     t2 = cfg["phase2"] / 100.0
 
@@ -690,7 +709,7 @@ def sequential_challenge(tr, cfg):
 
     for start in range(n_starts):
         o1, e1, k1, td1 = _run_phase(R, exit_days, start, bal0, unit, t1, dd,
-                                     floor, min_days, bd)
+                                     floor, min_days, bd, bt)
         p1[o1] += 1
         if o1 != "PASS":
             continue
@@ -701,7 +720,7 @@ def sequential_challenge(tr, cfg):
             p2["TIMEOUT"] += 1
             continue
         o2, e2, k2, _ = _run_phase(R, exit_days, e1 + 1, bal0, unit, t2, dd,
-                                   floor, min_days, bd)
+                                   floor, min_days, bd, bt)
         p2[o2] += 1
         if o2 == "PASS":
             n_full_pass += 1
@@ -720,6 +739,7 @@ def sequential_challenge(tr, cfg):
         "starts": n_starts,
         "min_days": min_days,
         "best_day_pct": bd,
+        "best_trade_pct": bt,
         # ---- Phase 1: unconditional, every start ----
         "p1": dict(pack(p1, n_starts),
                    n_pass=n_p1_pass,
@@ -837,9 +857,10 @@ def deterministic_path(tr, cfg):
     floor = bal0 * (1 - cfg["max_loss"] / 100.0)
     min_days = int(cfg.get("min_days", 0) or 0)
     bd = float(cfg.get("best_day_pct", 0) or 0)
+    bt = float(cfg.get("best_trade_pct", 0) or 0)
 
     o1, e1, k1, td1 = _run_phase(R, exit_days, 0, bal0, unit,
-                                 cfg["phase1"] / 100.0, dd, floor, min_days, bd)
+                                 cfg["phase1"] / 100.0, dd, floor, min_days, bd, bt)
     days1 = int((entry_t[e1] - entry_t[0]) / np.timedelta64(1, "D"))
     out = {"p1_outcome": o1, "p1_trades": k1, "p1_days": days1,
            "p1_trading_days": td1, "p2_outcome": "NOT REACHED",
@@ -851,7 +872,7 @@ def deterministic_path(tr, cfg):
         out["p2_outcome"] = "NOT REACHED"; out["full"] = "INCOMPLETE"
     else:
         o2, e2, k2, _ = _run_phase(R, exit_days, e1 + 1, bal0, unit,
-                                   cfg["phase2"] / 100.0, dd, floor, min_days, bd)
+                                   cfg["phase2"] / 100.0, dd, floor, min_days, bd, bt)
         days2 = int((entry_t[e2] - entry_t[e1 + 1]) / np.timedelta64(1, "D"))
         out.update(p2_outcome=o2, p2_trades=k2, p2_days=days2,
                    total_trades=k1 + k2,
@@ -1005,20 +1026,363 @@ def risk_comparison(tr, cfg, levels=(0.35, 0.40, 0.50, 0.60, 0.65, 0.70, 0.75, 0
     return rows
 
 
-def best_day_report(tr, cfg):
-    """Measure the Best Day ratio on the real trade sequence."""
-    thr = float(cfg.get("best_day_pct", 0) or 0)
+def consistency_report(tr, cfg):
+    """Measure every consistency dimension on the REAL trade sequence.
+
+    What firms usually call "the consistency rule" is the best-DAY rule, so
+    that is the same mechanic as the Best Day Rule - not a second, separate
+    constraint. best_trade is the genuinely different variant (a single trade
+    rather than a whole day); with multiple trades closing on the same day the
+    two ratios differ.
+
+    Lot-size consistency is reported but NOT simulated: this engine sizes every
+    trade as the same fixed fraction of the starting balance, so max/avg
+    position risk is exactly 1.000 and such a rule could never fire here.
+    Saying so is more honest than shipping a check that always passes."""
+    day_thr = float(cfg.get("best_day_pct", 0) or 0)
+    trade_thr = float(cfg.get("best_trade_pct", 0) or 0)
     unit = cfg["balance"] * cfg["risk_pct"] / 100.0
+
     t = tr.copy()
     t["d"] = pd.to_datetime(t.exit).dt.date
-    daily = (t.groupby("d").R.sum() * unit)
-    pos = daily[daily > 0]
-    total_pos = float(pos.sum())
-    best = float(pos.max()) if len(pos) else 0.0
-    pct = (100.0 * best / total_pos) if total_pos > 0 else None
-    return {"enabled": thr > 0, "threshold": thr, "best_day": best,
-            "total_positive": total_pos, "best_day_pct": pct,
-            "compliant": (None if thr <= 0 or pct is None else pct <= thr)}
+    daily = t.groupby("d").R.sum() * unit
+    pos_days = daily[daily > 0]
+    total_pos = float(pos_days.sum())
+    best_day = float(pos_days.max()) if len(pos_days) else 0.0
+    day_pct = (100.0 * best_day / total_pos) if total_pos > 0 else None
+
+    wins = t.R.values[t.R.values > 0] * unit
+    best_trade = float(wins.max()) if len(wins) else 0.0
+    trade_pct = (100.0 * best_trade / total_pos) if total_pos > 0 else None
+
+    multi = int((t.groupby("d").size() > 1).sum())
+
+    return {
+        "any_enabled": (day_thr > 0 or trade_thr > 0),
+        "day": {
+            "enabled": day_thr > 0, "threshold": day_thr,
+            "best": best_day, "pct": day_pct,
+            "compliant": (None if day_thr <= 0 or day_pct is None
+                          else day_pct <= day_thr),
+        },
+        "trade": {
+            "enabled": trade_thr > 0, "threshold": trade_thr,
+            "best": best_trade, "pct": trade_pct,
+            "compliant": (None if trade_thr <= 0 or trade_pct is None
+                          else trade_pct <= trade_thr),
+        },
+        "total_positive": total_pos,
+        "days_with_multiple_trades": multi,
+        "total_trading_days": int(len(daily)),
+        "lot_size": {
+            "simulated": False,
+            "max_over_avg_risk": 1.0,
+            "note": "fixed-fractional sizing: every trade risks the same amount, "
+                    "so a lot-size consistency rule can never trigger in this engine",
+        },
+    }
+
+
+def _fmt(v, suffix="", dash="n/a"):
+    if v is None:
+        return dash
+    if isinstance(v, float):
+        return ("%.2f" % v).rstrip("0").rstrip(".") + suffix
+    return "%s%s" % (v, suffix)
+
+
+def build_text_report(r, cfg):
+    """The whole report as plain text, so it can be copied in one click.
+
+    Deliberately mirrors the on-screen sections and keeps every label that
+    prevents misreading (shuffled vs real-order, conditional Phase 2, one
+    historical path). Nothing here is rounded differently from the UI."""
+    L = []
+    A_ = L.append
+    def rule(ch="="):
+        A_(ch * 66)
+
+    P = r.get("prop") or {}
+    E = r.get("edge") or {}
+    S = r.get("sequential") or {}
+    J = r.get("mc_joint") or {}
+    D = r.get("deterministic") or {}
+    T = r.get("trust") or {}
+    C = r.get("consistency") or {}
+    M = P.get("math") or {}
+    F = S.get("full") or {}
+    P1 = S.get("p1") or {}
+    P2 = S.get("p2") or {}
+
+    rule()
+    A_("PROPLAB STRATEGY REPORT")
+    A_("generated %s   |   mode %s   |   symbol %s"
+       % (r.get("saved_at", ""), str(r.get("mode", "")).upper(), cfg.get("symbol", "")))
+    rule()
+    A_("")
+    A_("FINAL VERDICT")
+    A_("  Strategy quality        : %s" % T.get("hold_label", "n/a"))
+    A_("  Prop risk posture       : %s" % T.get("posture", "n/a"))
+    A_("  Prop score              : %s/100  (%s)"
+       % (r.get("score"), (r.get("verdict") or ["", ""])[1]))
+    A_("  FULL 2-STEP sequential  : %s" % _fmt(F.get("pass_pct"), "%"))
+    A_("  Median total cal. days  : %s" % _fmt(F.get("med_days")))
+    A_("")
+    A_("  A backtest is not a guarantee of future performance. Phase 1 pass is")
+    A_("  NOT full 2-step pass. Shuffled Monte Carlo is not real-order testing.")
+    A_("  One historical path is not a probability.")
+    A_("")
+
+    rule("-")
+    A_("ACCOUNT SETTINGS (drive every account figure below)")
+    rule("-")
+    A_("  Balance                 : $%s" % _fmt(P.get("start")))
+    A_("  Risk per trade          : %s" % _fmt(P.get("risk_pct"), "%"))
+    A_("  Phase 1 / Phase 2 target: %s / %s"
+       % (_fmt(P.get("phase1_tgt"), "%"), _fmt(P.get("phase2_tgt"), "%")))
+    A_("  Daily loss / Max loss   : %s / %s"
+       % (_fmt(P.get("daily_loss"), "%"), _fmt(P.get("max_loss"), "%")))
+    A_("  Minimum trading days    : %s" % _fmt(S.get("min_days")))
+    A_("  Consistency best-DAY    : %s"
+       % ("off" if not C.get("day", {}).get("enabled") else _fmt(C["day"]["threshold"], "% cap")))
+    A_("  Consistency best-TRADE  : %s"
+       % ("off" if not C.get("trade", {}).get("enabled") else _fmt(C["trade"]["threshold"], "% cap")))
+    A_("")
+    A_("  EXACT ACCOUNT MATH")
+    A_("    1R                    : $%s" % _fmt(M.get("one_R")))
+    A_("    Phase 1 target        : $%s" % _fmt(M.get("p1_target_usd")))
+    A_("    Phase 2 target        : $%s" % _fmt(M.get("p2_target_usd")))
+    A_("    Daily loss limit      : -$%s" % _fmt(M.get("daily_usd")))
+    A_("    Maximum loss          : -$%s" % _fmt(M.get("maxloss_usd")))
+    A_("    R required Phase 1    : %sR  (target/risk conversion, NOT a trade estimate)"
+       % _fmt(M.get("p1_R_required")))
+    A_("    R required Phase 2    : %sR" % _fmt(M.get("p2_R_required")))
+    A_("")
+
+    rule("-")
+    A_("A. SHUFFLED MONTE CARLO - TRADE ORDER RANDOMIZED")
+    rule("-")
+    if J:
+        A_("  %s simulations. Order is randomized, which destroys real losing" % J.get("nsims"))
+        A_("  clusters. Both phases simulated jointly -> a TRUE joint probability,")
+        A_("  not Phase1 x Phase2. Consistency rules are NOT modelled here")
+        A_("  (they need real dates); see the sequential section for those.")
+        A_("")
+        j1 = J.get("p1", {}); j2 = J.get("p2_cond", {})
+        A_("  Phase 1        pass %s  maxloss %s  daily %s  never %s"
+           % (_fmt(j1.get("PASS"), "%"), _fmt(j1.get("FAIL_MAXLOSS"), "%"),
+              _fmt(j1.get("FAIL_DAILY"), "%"), _fmt(j1.get("TIMEOUT"), "%")))
+        A_("  Phase 2 |P1    pass %s  maxloss %s  daily %s  never %s"
+           % (_fmt(j2.get("PASS"), "%"), _fmt(j2.get("FAIL_MAXLOSS"), "%"),
+              _fmt(j2.get("FAIL_DAILY"), "%"), _fmt(j2.get("TIMEOUT"), "%")))
+        A_("  JOINT both-phase pass : %s" % _fmt(J.get("both_pct"), "%"))
+        A_("  Median trades P1/P2/total: %s / %s / %s"
+           % (_fmt(J.get("med_trades_p1")), _fmt(J.get("med_trades_p2")),
+              _fmt(J.get("med_trades_total"))))
+        A_("  Typical / worst drawdown : %s / %s"
+           % (_fmt(J.get("typ_dd"), "%"), _fmt(J.get("worst_dd"), "%")))
+        A_("  Typical / worst streak   : %s / %s trades"
+           % (_fmt(J.get("typ_streak")), _fmt(J.get("worst_streak"))))
+    else:
+        A_("  not available")
+    A_("")
+
+    rule("-")
+    A_("B. REAL-ORDER SEQUENTIAL - HISTORICAL TRADE ORDER PRESERVED")
+    rule("-")
+    if S:
+        A_("  Each historical trade is used in its actual chronological order;")
+        A_("  losing clusters are preserved. A challenge is started at every one")
+        A_("  of the %s historical trades." % S.get("starts"))
+        A_("")
+        A_("  Phase 1 (all starts)  pass %s  maxloss %s  daily %s  never %s"
+           % (_fmt(P1.get("PASS"), "%"), _fmt(P1.get("FAIL_MAXLOSS"), "%"),
+              _fmt(P1.get("FAIL_DAILY"), "%"), _fmt(P1.get("TIMEOUT"), "%")))
+        A_("  Phase 2 (conditional) pass %s  maxloss %s  daily %s  never %s"
+           % (_fmt(P2.get("PASS"), "%"), _fmt(P2.get("FAIL_MAXLOSS"), "%"),
+              _fmt(P2.get("FAIL_DAILY"), "%"), _fmt(P2.get("TIMEOUT"), "%")))
+        A_("    Phase 2 row = P(Phase 2 pass | Phase 1 passed), measured on the")
+        A_("    %s paths that actually completed Phase 1. NOT the overall" % P2.get("evaluated"))
+        A_("    probability of completing Phase 2.")
+        A_("")
+        A_("  Timing, CALENDAR days      median   25th   75th   90th   worst")
+        A_("    Phase 1                  %6s %6s %6s %6s %7s"
+           % (_fmt(P1.get("med_days")), _fmt(P1.get("d25")), _fmt(P1.get("d75")),
+              _fmt(P1.get("d90")), _fmt(P1.get("worst_days"))))
+        A_("    Phase 2                  %6s %6s %6s %6s %7s"
+           % (_fmt(P2.get("med_days")), _fmt(P2.get("d25")), _fmt(P2.get("d75")),
+              _fmt(P2.get("d90")), _fmt(P2.get("worst_days"))))
+        A_("    FULL 2-step              %6s      -  %6s %6s %7s"
+           % (_fmt(F.get("med_days")), _fmt(F.get("d75")), _fmt(F.get("d90")),
+              _fmt(F.get("worst_days"))))
+        A_("")
+        A_("  SEQUENTIAL FULL 2-STEP PASS : %s" % _fmt(F.get("pass_pct"), "%"))
+        A_("  Full sequential failure     : %s" % _fmt(F.get("fail_pct"), "%"))
+        A_("  Phase 1 passed, Phase 2 fail: %s" % _fmt(F.get("p1_pass_p2_fail_pct"), "%"))
+        A_("  Phase 1 failed              : %s" % _fmt(F.get("p1_fail_pct"), "%"))
+        A_("  Median total trades         : %s" % _fmt(F.get("med_trades")))
+    else:
+        A_("  not available")
+    A_("")
+
+    if J and S and F.get("pass_pct") is not None and J.get("both_pct") is not None:
+        gap = J["both_pct"] - F["pass_pct"]
+        rule("-")
+        A_("REALITY CHECK - SHUFFLED vs REAL ORDER")
+        rule("-")
+        A_("  Shuffled full 2-step pass : %s" % _fmt(J["both_pct"], "%"))
+        A_("  Real-order full 2-step    : %s" % _fmt(F["pass_pct"], "%"))
+        A_("  Difference                : %+.1f percentage points" % gap)
+        if gap > 5:
+            A_("  Shuffled results are OPTIMISTIC here. Randomising order breaks")
+            A_("  real losing clusters. Weight the sequential number.")
+        else:
+            A_("  Close agreement: trade-order clustering is not distorting the")
+            A_("  picture. The sequential number is still the one to weight.")
+        A_("")
+
+    rule("-")
+    A_("C. ONE HISTORICAL PATH - DETERMINISTIC (not a probability)")
+    rule("-")
+    if D:
+        A_("  Phase 1 result          : %s" % D.get("p1_outcome"))
+        A_("  Phase 2 result          : %s" % D.get("p2_outcome"))
+        A_("  Full challenge          : %s" % D.get("full"))
+        A_("  Trades P1/P2/total      : %s / %s / %s"
+           % (_fmt(D.get("p1_trades")), _fmt(D.get("p2_trades")), _fmt(D.get("total_trades"))))
+        A_("  Calendar days P1/P2/tot : %s / %s / %s"
+           % (_fmt(D.get("p1_days")), _fmt(D.get("p2_days")), _fmt(D.get("total_days"))))
+        A_("  Worst / final balance   : $%s / $%s"
+           % (_fmt(D.get("worst_balance")), _fmt(D.get("final_balance"))))
+        A_("  Max drawdown this path  : %s" % _fmt(D.get("max_dd_pct"), "%"))
+    else:
+        A_("  not available")
+    A_("")
+
+    rule("-")
+    A_("CONSISTENCY RULES")
+    rule("-")
+    if C:
+        d = C.get("day", {}); t2 = C.get("trade", {})
+        A_("  Best DAY   : $%s = %s of positive-day profit  | cap %s | %s"
+           % (_fmt(d.get("best")), _fmt(d.get("pct"), "%"),
+              ("off" if not d.get("enabled") else _fmt(d.get("threshold"), "%")),
+              ("-" if d.get("compliant") is None else ("PASS" if d["compliant"] else "NOT YET SATISFIED"))))
+        A_("  Best TRADE : $%s = %s of positive-day profit  | cap %s | %s"
+           % (_fmt(t2.get("best")), _fmt(t2.get("pct"), "%"),
+              ("off" if not t2.get("enabled") else _fmt(t2.get("threshold"), "%")),
+              ("-" if t2.get("compliant") is None else ("PASS" if t2["compliant"] else "NOT YET SATISFIED"))))
+        A_("  Trading days: %s, of which %s contained more than one trade"
+           % (_fmt(C.get("total_trading_days")), _fmt(C.get("days_with_multiple_trades"))))
+        A_("  Lot-size consistency: %s" % C.get("lot_size", {}).get("note", ""))
+        A_("  A violation is NOT an instant failure: the simulation keeps trading")
+        A_("  until the ratio complies, exactly as a real challenge requires.")
+    A_("")
+
+    rule("-")
+    A_("STRATEGY EDGE (in R - must NOT change when account settings change)")
+    rule("-")
+    A_("  Development expectancy  : %sR" % _fmt(E.get("dev")))
+    A_("  Validation expectancy   : %sR" % _fmt(E.get("val")))
+    A_("  Holdout expectancy      : %sR" % _fmt(E.get("hold")))
+    A_("  Holdout trade count     : %s%s"
+       % (_fmt(E.get("hold_n")),
+          "   [SMALL HOLDOUT SAMPLE]" if (E.get("hold_n") or 0) < 100 else ""))
+    A_("  Holdout t-stat          : %s" % _fmt(E.get("hold_t")))
+    A_("  Overall t-stat          : %s" % _fmt(E.get("overall_t")))
+    A_("  Profit factor           : %s" % _fmt(E.get("pf")))
+    A_("  Win rate                : %s" % _fmt(E.get("win"), "%"))
+    A_("  Sharpe                  : %s" % _fmt(E.get("sharpe")))
+    A_("  Trade count             : %s" % _fmt(E.get("trades")))
+    A_("  3x cost expectancy      : %sR" % _fmt(E.get("cost3x")))
+    A_("  Benchmark (%s-only drift): %sR"
+       % (E.get("bench_aligned", "?"), _fmt(E.get("bench"))))
+    A_("  Edge vs benchmark       : %sR" % _fmt(E.get("edge_vs_bench")))
+    A_("  Inverted expectancy     : %sR" % _fmt(E.get("inverted")))
+    A_("  Label                   : %s" % T.get("hold_label", "n/a"))
+    A_("    rule: holdout > %sR execution noise AND t >= 2.0 AND n >= 15"
+       % _fmt(T.get("exec_threshold")))
+    A_("")
+
+    rule("-")
+    A_("PROP RISK PROFILE (account-dependent)")
+    rule("-")
+    A_("  Risk per trade          : %s (posture %s)"
+       % (_fmt(P.get("risk_pct"), "%"), T.get("posture", "n/a")))
+    A_("  Typical / worst DD      : %s / %s"
+       % (_fmt(J.get("typ_dd"), "%"), _fmt(J.get("worst_dd"), "%")))
+    A_("  Typical / worst streak  : %s / %s trades"
+       % (_fmt(J.get("typ_streak")), _fmt(J.get("worst_streak"))))
+    A_("  Worst streak at this risk: -%s of account" % _fmt(T.get("streak_exposure_pct"), "%"))
+    A_("  Max-loss prob (seq P1)  : %s" % _fmt(P1.get("FAIL_MAXLOSS"), "%"))
+    A_("  Daily-loss prob (seq P1): %s" % _fmt(P1.get("FAIL_DAILY"), "%"))
+    A_("  Full challenge pass     : %s" % _fmt(F.get("pass_pct"), "%"))
+    A_("  Median time to pass     : %s calendar days" % _fmt(F.get("med_days")))
+    A_("")
+
+    rule("-")
+    A_("TIME TO TARGET")
+    rule("-")
+    A_("  Calendar days include weekends and periods with no trade. They are")
+    A_("  not trading days, not bars, and not trades.")
+    A_("  Trade frequency         : %s trades/year" % _fmt(P.get("trades_per_year")))
+    A_("  Avg calendar days/trade : %s" % _fmt(P.get("avg_days_between")))
+    A_("  Distinct trading days   : %s" % _fmt(P.get("active_days")))
+    A_("")
+
+    if r.get("risk_table"):
+        rule("-")
+        A_("RISK COMPARISON (identical strategy and trades; only risk changes)")
+        rule("-")
+        A_("   risk   P1seq  P2|P1  FULLseq  MCboth  maxloss  medDays  typDD  worstDD")
+        for x in r["risk_table"]:
+            A_("  %5.2f%%  %5.1f  %5.1f  %7.1f  %6.1f  %7.1f  %7s  %5.1f  %7.1f"
+               % (x["risk"], x["seq_p1"], x["seq_p2_cond"], x["seq_full"],
+                  x["mc_both"], x["maxloss"], _fmt(x["med_days"]),
+                  x["typ_dd"], x["worst_dd"]))
+        A_("")
+
+    if r.get("yearly"):
+        rule("-")
+        A_("YEAR / REGIME BREAKDOWN")
+        rule("-")
+        A_("   year  trades  expectancy      PF   win rate")
+        for y in r["yearly"]:
+            A_("   %d  %6d  %+10.3fR  %6.2f  %8.1f%%"
+               % (y["year"], y["n"], y["expR"], y["pf"], y["win"]))
+        A_("")
+
+    conc = r.get("concentration") or {}
+    if conc.get("levels"):
+        rule("-")
+        A_("TRADE CONTRIBUTION CHECK")
+        rule("-")
+        A_("  baseline expectancy %.4fR" % conc.get("expR", 0.0))
+        for L2 in conc["levels"]:
+            A_("   drop top %-3d winners -> %+.4fR   (those trades = %.1f%% of total R)"
+               % (L2["k"], L2["expR_without"], L2["pct_of_totR"]))
+        A_("")
+
+    if r.get("cost"):
+        rule("-")
+        A_("COST STRESS")
+        rule("-")
+        for c in r["cost"]:
+            A_("   %sx cost -> %+.4fR  %s" % (c["mult"], c["expR"], "PASS" if c["pos"] else "FAIL"))
+        A_("")
+
+    rule("-")
+    A_("WHAT TO TRUST")
+    rule("-")
+    for x in (T.get("higher_trust") or []):
+        A_("  HIGHER : %s" % x)
+    for x in (T.get("lower_trust") or []):
+        A_("  LOWER  : %s" % x)
+    A_("")
+    rule()
+    A_("END OF REPORT")
+    rule()
+    return "\n".join(L)
 
 
 def lookahead_check(Strat, data, base_tf, build_log=None, d_full=None):
@@ -1418,6 +1782,13 @@ def run_test(code, cfg, mode="fast", progress=None):
     peak_bal = max(eqpath)
     trough_bal = min(eqpath)
     research_final = eqpath[-1]
+    # X axis for the charts: the equity path has one point per trade plus the
+    # starting balance, so date[0] is the first entry and date[k] the k-th exit.
+    _ent = pd.to_datetime(tr.entry)
+    _ex = pd.to_datetime(tr.exit)
+    _all_dates = [str(_ent.iloc[0])[:10]] + [str(x)[:10] for x in _ex]
+    _step = max(1, len(eqpath) // 400)
+    _eq_dates = _all_dates[::_step]
 
     # === ACCOUNT SIMULATION (prop rules, same sizing model) ===============
     # Runs the ACTUAL trade sequence under the firm's rules; stops at target or
@@ -1595,7 +1966,7 @@ def run_test(code, cfg, mode="fast", progress=None):
         "deterministic": det,       # ONE historical path (not a probability)
         "concentration": winner_concentration(tr),
         "yearly": yearly_breakdown(tr),
-        "best_day": best_day_report(tr, cfg),
+        "consistency": consistency_report(tr, cfg),
         "risk_table": risk_rows,
         "trust": trust,
         "benchmarks": bench,
@@ -1639,6 +2010,13 @@ def run_test(code, cfg, mode="fast", progress=None):
         "cost_ok": cost_ok,
         "equity": [round(v, 1) for v in eqpath[:: max(1, len(eqpath) // 400)]],
         "drawdown": [round(v, 2) for v in dd_series[:: max(1, len(dd_series) // 400)]],
+        "equity_dates": _eq_dates,
+        "equity_levels": {
+            "start": bal0,
+            "p1_target": bal0 * (1 + cfg["phase1"] / 100.0),
+            "p2_target": bal0 * (1 + cfg["phase2"] / 100.0),
+            "max_loss_floor": bal0 * (1 - cfg["max_loss"] / 100.0),
+        },
         "trades": tl,
         "trade_count": md_all["n"],           # single canonical count, used everywhere
         "sizing": f"fixed {cfg['risk_pct']}% of ${bal0:,.0f} = ${fixed_risk:,.0f} per 1R (no compounding)",
@@ -1672,6 +2050,12 @@ def run_test(code, cfg, mode="fast", progress=None):
     report_id = uuid.uuid4().hex[:12]
     result["report_id"] = report_id
     result["saved_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    # Plain-text copy of the whole report, built AFTER the audit so it always
+    # reflects the final verdict. One click copies the entire thing.
+    try:
+        result["text_report"] = build_text_report(result, cfg)
+    except Exception as e:
+        result["text_report"] = "text report unavailable: %s: %s" % (type(e).__name__, e)
     save_report(report_id, result)
     h = load_hist()
     h.append(
