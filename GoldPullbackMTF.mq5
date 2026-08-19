@@ -71,12 +71,87 @@ input double   InpInitialBalance= 0.0;     // 0 = balance when the EA is attache
 input group "=== Execution ==="
 input long     InpMagic         = 20260819;
 input ulong    InpSlippage      = 30;      // max deviation, points
-input int      InpMaxSpreadPts  = 30;      // skip entry above this spread (0 = off)
+// BUGFIX: this used to be a raw POINT count defaulting to 30, which silently
+// produced ZERO TRADES on any 3-digit gold feed (a 20-cent spread is 20 points
+// at 2 digits but 200 points at 3 digits). It is now expressed in PRICE and
+// defaults to OFF, because a filter that silently blocks every trade is a far
+// worse failure than one that lets a wide spread through.
+input double   InpMaxSpreadPrice = 0.0;    // skip entry above this spread in PRICE (0.50 = 50 cents on gold; 0 = off)
 input int      InpM30History    = 5000;    // M30 bars loaded for the pullback EMA
 input int      InpH4History     = 3000;    // H4 bars loaded for EMA seeding
 input int      InpD1History     = 1200;    // D1 bars loaded for EMA/ADX seeding
-input int      InpMinD1Bars     = 600;     // refuse to trade below this (parity guard)
+// Was 600. Measured convergence: at 300 D1 bars the EMA50 deviates by 7.9e-03
+// on a ~2000 price (4e-6 relative) and ADX by 7e-06 - far below anything that
+// can flip a comparison. 600 buys exactness that does not change a single
+// signal, while silently blocking the first ~2.4 YEARS of a backtest.
+input int      InpMinD1Bars     = 300;     // refuse to trade below this (parity guard)
+input bool     InpRoundToNearest = true;  // round lots to the NEAREST step (false = always down)
 input bool     InpVerboseLog    = true;
+input int      InpTallyEvery    = 2000;    // print the rejection tally every N bars (0 = only at the end)
+
+//====================== DIAGNOSTICS =================================
+// Every rejection is counted. If the EA takes no trades, the tally says
+// exactly which gate is responsible instead of leaving you guessing.
+#define REJ_M30HIST   0
+#define REJ_EARLY     1
+#define REJ_SESSION   2
+#define REJ_ATR       3
+#define REJ_VOLUME    4
+#define REJ_H4HIST    5
+#define REJ_H4IDX     6
+#define REJ_D1HIST    7
+#define REJ_D1IDX     8
+#define REJ_ADXNA     9
+#define REJ_ADXLOW   10
+#define REJ_ADXFALL  11
+#define REJ_NOTBULL  12
+#define REJ_NOTRIG   13
+#define REJ_SPREAD   14
+#define REJ_RISKGATE 15
+#define REJ_STOPS    16
+#define REJ_SIGNAL   17
+#define REJ_COUNT    18
+
+long   g_rej[REJ_COUNT];
+long   g_barsSeen = 0;
+
+string RejName(int i)
+  {
+   switch(i)
+     {
+      case REJ_M30HIST:  return "not enough M30 history";
+      case REJ_EARLY:    return "M30 index too early";
+      case REJ_SESSION:  return "inside skipped session hours";
+      case REJ_ATR:      return "ATR unavailable";
+      case REJ_VOLUME:   return "volume filter";
+      case REJ_H4HIST:   return "not enough H4 history";
+      case REJ_H4IDX:    return "H4 index unavailable";
+      case REJ_D1HIST:   return "not enough D1 history (parity guard)";
+      case REJ_D1IDX:    return "D1 index unavailable";
+      case REJ_ADXNA:    return "D1 ADX unavailable";
+      case REJ_ADXLOW:   return "D1 ADX below threshold";
+      case REJ_ADXFALL:  return "D1 ADX not rising";
+      case REJ_NOTBULL:  return "H4/D1 not bullish";
+      case REJ_NOTRIG:   return "no breakout and no pullback";
+      case REJ_SPREAD:   return "spread too wide";
+      case REJ_RISKGATE: return "risk gate refused the size";
+      case REJ_STOPS:    return "stops too close to market";
+      case REJ_SIGNAL:   return "SIGNALS ACCEPTED";
+     }
+   return "?";
+  }
+
+void Reject(int code) { if(code >= 0 && code < REJ_COUNT) g_rej[code]++; }
+
+void PrintTally(string when)
+  {
+   PrintFormat("---- %s: %I64d bars evaluated ----", when, g_barsSeen);
+   for(int i = 0; i < REJ_COUNT; i++)
+      if(g_rej[i] > 0)
+         PrintFormat("   %-42s %I64d", RejName(i), g_rej[i]);
+   if(g_rej[REJ_SIGNAL] == 0)
+      Print("   NO SIGNALS ACCEPTED - the largest count above is what is blocking you.");
+  }
 
 //====================== STATE =======================================
 CTrade   trade;
@@ -113,6 +188,23 @@ int OnInit()
       Print("WARNING: only ", d1bars, " D1 bars available; ", InpMinD1Bars,
             " needed for exact indicator parity. The EA will not trade until MT5 loads more history.");
 
+   ArrayInitialize(g_rej, 0);
+   // Symbol facts that silently break a port if they differ from the validated
+   // CSV. Printed every time so a zero-trade run is diagnosable from the log.
+   MqlDateTime st0; TimeToStruct(TimeCurrent(), st0);
+   PrintFormat("SYMBOL CHECK %s: digits=%d point=%g tick_size=%g tick_value=%g "
+               "spread_now=%d points (%.5f price) | server hour=%d | bars M30=%d H4=%d D1=%d",
+               _Symbol, (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS), _Point,
+               SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE),
+               SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE_LOSS),
+               (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD),
+               SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID),
+               st0.hour, Bars(_Symbol, PERIOD_M30), Bars(_Symbol, PERIOD_H4),
+               Bars(_Symbol, PERIOD_D1));
+   Print("The strategy was validated on a 2-DIGIT gold feed whose bar hours ran "
+         "06:00-23:xx server time. If your digits or server hour differ, set "
+         "InpServerHourOffset and re-check before trusting the results.");
+
    PrintFormat("GoldPullbackMTF v3 on %s | initial balance %.2f | risk %.2f%% | "
                "max DD %.1f%% (buffer %.1f%%) | daily %.1f%% (buffer %.1f%%) | trailing=%s",
                _Symbol, g_initialBal, InpRiskPercent, InpMaxDDPercent, InpDDBufferPct,
@@ -120,7 +212,10 @@ int OnInit()
    return INIT_SUCCEEDED;
   }
 
-void OnDeinit(const int reason) {}
+void OnDeinit(const int reason)
+  {
+   PrintTally("FINAL");
+  }
 
 //====================================================================
 //  INDICATORS - explicit loops that reproduce pandas exactly
@@ -329,7 +424,24 @@ double RiskGate(double stopDist, string &reason)
    double minL = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double maxL = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
    if(InpMaxLots > 0.0) lots = MathMin(lots, InpMaxLots);
-   if(step > 0.0)       lots = MathFloor(lots / step) * step;
+   // Round to the NEAREST step rather than always down. Flooring systematically
+   // undersized every trade - in the user's MT5 run the average win came out at
+   // 86% of a nominal 2R purely from that. Rounding up is only accepted when it
+   // stays within 10% of the intended risk, and the wall re-check below still
+   // has the final say.
+   if(step > 0.0)
+     {
+      double lotsDown = MathFloor(lots / step) * step;
+      double lotsUp   = lotsDown + step;
+      lots = lotsDown;
+      if(InpRoundToNearest && (lotsUp - lots) <= (lots - lotsDown) + step)
+        {
+         double nearest = (MathAbs(lotsUp - (allowed / lossPerLot)) <
+                           MathAbs(lotsDown - (allowed / lossPerLot))) ? lotsUp : lotsDown;
+         if(nearest * lossPerLot <= wantRisk * 1.10)
+            lots = nearest;
+        }
+     }
    if(lots < minL)      { reason = "required size below broker minimum after risk gating"; return 0.0; }
    if(lots > maxL)      lots = maxL;
 
@@ -357,10 +469,10 @@ bool LongSignal(double &sigClose, double &atrVal, string &why)
    MqlRates m[];
    int nm = CopyRates(_Symbol, PERIOD_M30, 0, needM30, m);
    if(nm < MathMax(InpDonchian, InpVolMa) + InpAtrPeriod + 10)
-     { why = "not enough M30 history"; return false; }
+     { why = "not enough M30 history"; Reject(REJ_M30HIST); return false; }
 
    int sig = nm - 2;                       // shift 1 == last CLOSED M30 bar
-   if(sig < InpAtrPeriod + InpDonchian + 2) { why = "M30 index too early"; return false; }
+   if(sig < InpAtrPeriod + InpDonchian + 2) { why = "M30 index too early"; Reject(REJ_EARLY); return false; }
 
    sigClose = m[sig].close;
    datetime sigTime = m[sig].time;
@@ -369,10 +481,10 @@ bool LongSignal(double &sigClose, double &atrVal, string &why)
    MqlDateTime st; TimeToStruct(sigTime, st);
    int hr = (st.hour + InpServerHourOffset) % 24;
    if(hr < 0) hr += 24;
-   if(hr >= InpSkipHourLo && hr <= InpSkipHourHi) { why = "inside skipped session"; return false; }
+   if(hr >= InpSkipHourLo && hr <= InpSkipHourHi) { why = "inside skipped session"; Reject(REJ_SESSION); return false; }
 
    // ---- ATR = SIMPLE mean of TR over 14 closed bars ----
-   if(!AtrSma(m, nm, sig, InpAtrPeriod, atrVal)) { why = "ATR unavailable"; return false; }
+   if(!AtrSma(m, nm, sig, InpAtrPeriod, atrVal)) { why = "ATR unavailable"; Reject(REJ_ATR); return false; }
 
    // ---- Donchian high and volume average, both over the bars BEFORE sig ----
    double prevHigh = -DBL_MAX;
@@ -384,7 +496,7 @@ bool LongSignal(double &sigClose, double &atrVal, string &why)
       volSum += (double)(InpUseRealVolume ? m[i].real_volume : m[i].tick_volume);
    double volMa = volSum / InpVolMa;
    double volNow = (double)(InpUseRealVolume ? m[sig].real_volume : m[sig].tick_volume);
-   if(volMa <= 0.0 || volNow <= volMa * InpVolMult) { why = "volume filter"; return false; }
+   if(volMa <= 0.0 || volNow <= volMa * InpVolMult) { why = "volume filter"; Reject(REJ_VOLUME); return false; }
 
    // ---- M30 pullback EMA (needs the full series for correct seeding) ----
    double closes[]; ArrayResize(closes, nm);
@@ -394,10 +506,10 @@ bool LongSignal(double &sigClose, double &atrVal, string &why)
    // ---- H4 context: last CLOSED H4 bar relative to the signal bar ----
    MqlRates h4[];
    int nh = CopyRates(_Symbol, PERIOD_H4, 0, InpH4History, h4);
-   if(nh < InpH4Slow * 6) { why = "not enough H4 history"; return false; }
+   if(nh < InpH4Slow * 6) { why = "not enough H4 history"; Reject(REJ_H4HIST); return false; }
    int shH4 = iBarShift(_Symbol, PERIOD_H4, sigTime, false) + 1;   // +1 => last CLOSED
    int iH4  = nh - 1 - shH4;
-   if(shH4 < 1 || iH4 < 1) { why = "H4 index unavailable"; return false; }
+   if(shH4 < 1 || iH4 < 1) { why = "H4 index unavailable"; Reject(REJ_H4IDX); return false; }
 
    double h4c[]; ArrayResize(h4c, nh);
    for(int i = 0; i < nh; i++) h4c[i] = h4[i].close;
@@ -409,10 +521,14 @@ bool LongSignal(double &sigClose, double &atrVal, string &why)
    MqlRates d1[];
    int nd = CopyRates(_Symbol, PERIOD_D1, 0, InpD1History, d1);
    if(nd < InpMinD1Bars)
-     { why = StringFormat("only %d D1 bars (need %d for parity)", nd, InpMinD1Bars); return false; }
+     {
+      why = StringFormat("only %d D1 bars (need %d for parity)", nd, InpMinD1Bars);
+      Reject(REJ_D1HIST);
+      return false;
+     }
    int shD1 = iBarShift(_Symbol, PERIOD_D1, sigTime, false) + 1;
    int iD1  = nd - 1 - shD1;
-   if(shD1 < 1 || iD1 < 1) { why = "D1 index unavailable"; return false; }
+   if(shD1 < 1 || iD1 < 1) { why = "D1 index unavailable"; Reject(REJ_D1IDX); return false; }
 
    double d1c[]; ArrayResize(d1c, nd);
    for(int i = 0; i < nd; i++) d1c[i] = d1[i].close;
@@ -421,20 +537,21 @@ bool LongSignal(double &sigClose, double &atrVal, string &why)
 
    double d1v = d1adx[iD1];
    double d1p = d1adx[iD1 - 1];
-   if(d1v == EMPTY_VALUE || d1p == EMPTY_VALUE) { why = "D1 ADX unavailable"; return false; }
-   if(d1v < InpD1AdxMin)  { why = "D1 ADX below threshold"; return false; }
-   if(!(d1v > d1p))       { why = "D1 ADX not rising"; return false; }
+   if(d1v == EMPTY_VALUE || d1p == EMPTY_VALUE) { why = "D1 ADX unavailable"; Reject(REJ_ADXNA); return false; }
+   if(d1v < InpD1AdxMin)  { why = "D1 ADX below threshold"; Reject(REJ_ADXLOW); return false; }
+   if(!(d1v > d1p))       { why = "D1 ADX not rising"; Reject(REJ_ADXFALL); return false; }
 
    bool h4Bull = (h4f[iH4] > h4s[iH4]) && (h4[iH4].close > h4s[iH4]);
    bool d1Bull = (d1[iD1].close > d1e[iD1]);
-   if(!(h4Bull && d1Bull)) { why = "HTF not bullish"; return false; }
+   if(!(h4Bull && d1Bull)) { why = "HTF not bullish"; Reject(REJ_NOTBULL); return false; }
 
    bool breakout = (m[sig].close > prevHigh);
    bool pullback = (m[sig].low <= emaPb[sig]) && (m[sig].close > emaPb[sig])
                    && (m[sig].close > m[sig].open);
-   if(!(breakout || pullback)) { why = "no entry trigger"; return false; }
+   if(!(breakout || pullback)) { why = "no entry trigger"; Reject(REJ_NOTRIG); return false; }
 
    why = breakout ? "breakout" : "pullback";
+   Reject(REJ_SIGNAL);
    return true;
   }
 
@@ -540,18 +657,21 @@ void OnTick()
 
    // ---------- signal ----------
    double sigClose = 0.0, atrVal = 0.0; string why = "";
-   if(!LongSignal(sigClose, atrVal, why))
-     {
-      if(InpVerboseLog && StringFind(why, "history") >= 0) Print("No trade: ", why);
-      return;
-     }
+   g_barsSeen++;
+   if(InpTallyEvery > 0 && (g_barsSeen % InpTallyEvery) == 0)
+      PrintTally("progress");
 
-   // ---------- spread guard ----------
-   if(InpMaxSpreadPts > 0)
+   if(!LongSignal(sigClose, atrVal, why))
+      return;
+
+   // ---------- spread guard (PRICE units, digit-independent) ----------
+   double sprPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   if(InpMaxSpreadPrice > 0.0 && sprPrice > InpMaxSpreadPrice)
      {
-      long spr = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-      if(spr > InpMaxSpreadPts)
-        { Print("Skipped (", why, "): spread ", spr, " > ", InpMaxSpreadPts); return; }
+      Reject(REJ_SPREAD);
+      if(InpVerboseLog)
+         PrintFormat("Skipped (%s): spread %.5f > limit %.5f", why, sprPrice, InpMaxSpreadPrice);
+      return;
      }
 
    int    dg    = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
@@ -562,13 +682,13 @@ void OnTick()
    double sl = NormalizeDouble(sigClose - InpAtrMult * atrVal, dg);
    double tp = NormalizeDouble(ask + InpRR * (ask - sl), dg);
    if(sl >= bid - stops || tp <= ask + stops)
-     { Print("Skipped (", why, "): stops too close to market."); return; }
+     { Reject(REJ_STOPS); Print("Skipped (", why, "): stops too close to market."); return; }
 
    // ---------- LAYER 3: pre-trade risk gate ----------
    string reason = "";
    double lots = RiskGate(ask - sl, reason);
    if(lots <= 0.0)
-     { Print("Skipped (", why, "): ", reason); return; }
+     { Reject(REJ_RISKGATE); Print("Skipped (", why, "): ", reason); return; }
 
    if(trade.Buy(lots, _Symbol, 0.0, sl, tp))
      {
