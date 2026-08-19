@@ -114,6 +114,7 @@ input int      InpTallyEvery    = 2000;    // print the rejection tally every N 
 
 long   g_rej[REJ_COUNT];
 long   g_barsSeen = 0;
+int    g_effMinD1  = 0;   // InpMinD1Bars clamped so it can never exceed InpD1History
 
 string RejName(int i)
   {
@@ -177,6 +178,19 @@ int OnInit()
      { Print("FATAL: risk inputs must be positive."); return INIT_PARAMETERS_INCORRECT; }
    if(InpDDBufferPct >= InpMaxDDPercent)
      { Print("FATAL: DD buffer must be smaller than the max-DD limit."); return INIT_PARAMETERS_INCORRECT; }
+
+   // A parity guard that DEMANDS more D1 bars than the loader is allowed to
+   // fetch would reject every bar forever (this exact contradiction produced a
+   // zero-trade run). Clamp the requirement to what can actually be loaded and
+   // warn loudly rather than fail silently.
+   g_effMinD1 = InpMinD1Bars;
+   if(g_effMinD1 > InpD1History)
+     {
+      Print("WARNING: InpMinD1Bars (", InpMinD1Bars, ") exceeds InpD1History (",
+            InpD1History, "). Clamping the requirement to ", InpD1History,
+            ". Raise InpD1History if you want a stricter parity guard.");
+      g_effMinD1 = InpD1History;
+     }
 
    trade.SetExpertMagicNumber((ulong)InpMagic);
    trade.SetDeviationInPoints(InpSlippage);
@@ -520,9 +534,9 @@ bool LongSignal(double &sigClose, double &atrVal, string &why)
    // ---- D1 context: last CLOSED D1 bar, plus the one before it ----
    MqlRates d1[];
    int nd = CopyRates(_Symbol, PERIOD_D1, 0, InpD1History, d1);
-   if(nd < InpMinD1Bars)
+   if(nd < g_effMinD1)
      {
-      why = StringFormat("only %d D1 bars (need %d for parity)", nd, InpMinD1Bars);
+      why = StringFormat("only %d D1 bars (need %d for parity)", nd, g_effMinD1);
       Reject(REJ_D1HIST);
       return false;
      }
