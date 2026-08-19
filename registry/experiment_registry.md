@@ -144,3 +144,42 @@ Future effort should size around that property rather than try to filter it away
 
 **Status: v2 remains NOT VALIDATED. Claim "survives any condition in gold" is
 FALSIFIED.**
+
+---
+
+## Phase 11 — new "Donchian + pullback, D1-ADX, skip-London" strategy (2026-08-19)
+
+Pre-registered comparison vs the v1 96/100 (breakout-only). XAUUSD, 0.4% risk,
+holdout physically sealed by the tester's dev/val/hold split.
+
+| metric | v1 (breakout) | NEW (breakout OR pullback, skip 07-11 UTC) |
+|---|---|---|
+| trades | 189 (29/yr) | **464 (72/yr)** |
+| expR | +0.222 | +0.185 |
+| overall t | +2.07 | **+2.72** |
+| holdout | +0.472R n=53 t=2.27 | **+0.526R n=93 t=3.38** |
+| real-order Phase-1 | 73% | **94%** |
+| edge vs long benchmark | +0.176R | +0.114R |
+| inverted | -0.198R | -0.113R |
+
+Robustness checks that v1 never cleared:
+- Winner concentration: dropping top-5 winners barely moves expR (+0.185 -> +0.165);
+  RR is fixed 2.0 so no single trade dominates. NOT outlier-driven.
+- Per-year: POSITIVE every year 2020-2026 (worst 2023 breakeven +0.000, 2022 +0.023).
+  No losing year - the main weakness of every earlier variant.
+- Worst ACTUAL consecutive losing run in history = 8 trades; worst real
+  peak-to-trough = 10.0R.
+
+Verdict: materially better and faster than v1, and the first variant to pass a
+holdout with t > 3 AND survive the winner-concentration and per-year checks. The
+extra trades come from adding the pullback entry and dropping the H4-ADX gate;
+the skip-London filter removes the worst session (London expR was -0.16).
+
+**Still gold-only and still a bull-trend vehicle** (D1 close > EMA50 + H4 bull are
+required, so it only longs uptrends). Not validated off XAUUSD. Recommended risk
+for a 2-step $5k: 0.5% (full 2-step seq 89%, worst shuffled DD 11.7% vs 10% cap
+is close but sequential max-loss prob is 0%). 0.65% raises seq full-pass to ~94%
+and cuts median time, but pushes 95th-pct shuffled DD to 12.7%.
+
+EA parity: see DonchianMTF_v2.mq5 notes - MQL5 must use SMA(TR,14) not iATR, and
+re-anchor TP to the actual fill, or live diverges from this backtest.
